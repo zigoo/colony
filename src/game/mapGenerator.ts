@@ -30,13 +30,13 @@ const seedResource = (
   type: TileType,
   rng: () => number,
 ): Pick<Tile, 'hasResource' | 'resourceType' | 'resourceAmount'> => {
-  if (type === TileType.Forest && rng() > RESOURCE_SPAWN_CHANCE.forest) {
+  if (type === TileType.Forest && rng() < RESOURCE_SPAWN_CHANCE.forest) {
     const resourceAmount = Math.floor(rng() * (RESOURCE_AMOUNT.woodMax - RESOURCE_AMOUNT.woodMin)) + RESOURCE_AMOUNT.woodMin;
 
     return { hasResource: true, resourceType: ResourceType.Wood, resourceAmount };
   }
 
-  if (type === TileType.Stone && rng() > RESOURCE_SPAWN_CHANCE.stone) {
+  if (type === TileType.Stone && rng() < RESOURCE_SPAWN_CHANCE.stone) {
     const resourceAmount = Math.floor(rng() * (RESOURCE_AMOUNT.stoneMax - RESOURCE_AMOUNT.stoneMin)) + RESOURCE_AMOUNT.stoneMin;
 
     return { hasResource: true, resourceType: ResourceType.Stone, resourceAmount };
