@@ -55,6 +55,7 @@ export interface Tile {
   resourceType: ResourceType;
   resourceAmount: number;
   moveCost: number;
+  lastHarvestedAt?: number;
 }
 
 export interface MapState {
@@ -92,6 +93,8 @@ export interface Unit {
   carrying: ResourceType | null;
   carryingAmount: number;
   facing: Direction;
+  gatherTarget: { col: number; row: number } | null;
+  collectingTicksRemaining: number;
 }
 
 export type ResourceInventory = Record<Exclude<ResourceType, ResourceType.None>, number>;

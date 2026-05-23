@@ -55,7 +55,7 @@ const findUnitsInScreenBox = (
 };
 
 export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): void => {
-  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, setSelectionBox, moveUnitTo, rebuildOccupants } = useStore();
+  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, setSelectionBox, moveUnitTo, commandGather, rebuildOccupants } = useStore();
   const isDragging = useRef(false);
   const isShiftSelecting = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
@@ -142,7 +142,12 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
 
           if (isWithinBounds(col, row)) {
             if (ui.selectedUnitIds.length > 0) {
-              ui.selectedUnitIds.forEach((id, index) => moveUnitTo(id, col, row, index * 2));
+              const tile = game.map.tiles[`${col},${row}`];
+              if (tile?.hasResource) {
+                commandGather(ui.selectedUnitIds, col, row);
+              } else {
+                ui.selectedUnitIds.forEach((id, index) => moveUnitTo(id, col, row, index * 2));
+              }
               if (!e.metaKey) selectUnits([]);
             } else {
               selectTile(col, row);
@@ -182,5 +187,5 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       el.removeEventListener('wheel', onWheel);
       window.removeEventListener('resize', onResize);
     };
-  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, setSelectionBox, moveUnitTo]);
+  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, setSelectionBox, moveUnitTo, commandGather]);
 };

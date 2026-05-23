@@ -12,8 +12,8 @@ export const CAMERA_ZOOM_STEP_OUT = 0.9;
 
 export const MIN_DRAG_DISTANCE = 2;
 export const MIN_ZOOM_FOR_RESOURCES = 0.5;
-export const RESOURCE_DOT_BASE_RADIUS = 4;
-export const RESOURCE_DOT_MIN_RADIUS = 2;
+export const RESOURCE_DOT_MIN_SCREEN_RADIUS = 2.5;
+export const RESOURCE_DOT_MAX_SCREEN_RADIUS = 9;
 
 export const ELEVATION_THRESHOLDS = {
   water:    0.20,
@@ -26,6 +26,8 @@ export const ELEVATION_THRESHOLDS = {
 export const RESOURCE_SPAWN_CHANCE = {
   forest: 0.3,
   stone:  0.4,
+  food:   0.15,
+  ore:    0.10,
 } as const;
 
 export const RESOURCE_AMOUNT = {
@@ -33,7 +35,30 @@ export const RESOURCE_AMOUNT = {
   woodMax:  8,
   stoneMin: 2,
   stoneMax: 6,
+  foodMin:  2,
+  foodMax:  5,
+  oreMin:   1,
+  oreMax:   4,
 } as const;
+
+export const RESOURCE_AMOUNT_MAX: Partial<Record<ResourceType, number>> = {
+  [ResourceType.Wood]:  RESOURCE_AMOUNT.woodMax,
+  [ResourceType.Stone]: RESOURCE_AMOUNT.stoneMax,
+  [ResourceType.Food]:  RESOURCE_AMOUNT.foodMax,
+  [ResourceType.Ore]:   RESOURCE_AMOUNT.oreMax,
+};
+
+export const GATHER_TICKS = 5;
+
+export const RESOURCE_REGROW_TICKS: Partial<Record<ResourceType, number>> = {
+  [ResourceType.Wood]: 200,
+  [ResourceType.Food]: 100,
+};
+
+export const RESOURCE_REGROW_AMOUNT: Partial<Record<ResourceType, { min: number; max: number }>> = {
+  [ResourceType.Wood]: { min: 3, max: 8 },
+  [ResourceType.Food]: { min: 2, max: 5 },
+};
 
 export const TILE_MOVE_COSTS: Record<TileType, number> = {
   [TileType.Water]:    Infinity,

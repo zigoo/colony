@@ -28,7 +28,7 @@ export const useGameLoop = (canvas: React.RefObject<HTMLCanvasElement | null>): 
       accumulator += delta;
 
       while (accumulator >= TICK_MS) {
-        storeRef.current().tickUnits();
+        storeRef.current().tick();
         accumulator -= TICK_MS;
       }
 

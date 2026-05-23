@@ -30,16 +30,32 @@ const seedResource = (
   type: TileType,
   rng: () => number,
 ): Pick<Tile, 'hasResource' | 'resourceType' | 'resourceAmount'> => {
-  if (type === TileType.Forest && rng() < RESOURCE_SPAWN_CHANCE.forest) {
-    const resourceAmount = Math.floor(rng() * (RESOURCE_AMOUNT.woodMax - RESOURCE_AMOUNT.woodMin)) + RESOURCE_AMOUNT.woodMin;
-
-    return { hasResource: true, resourceType: ResourceType.Wood, resourceAmount };
+  if (type === TileType.Forest) {
+    const roll = rng();
+    if (roll < RESOURCE_SPAWN_CHANCE.forest) {
+      const resourceAmount = Math.floor(rng() * (RESOURCE_AMOUNT.woodMax - RESOURCE_AMOUNT.woodMin)) + RESOURCE_AMOUNT.woodMin;
+      return { hasResource: true, resourceType: ResourceType.Wood, resourceAmount };
+    }
+    if (roll < RESOURCE_SPAWN_CHANCE.forest + RESOURCE_SPAWN_CHANCE.food) {
+      const resourceAmount = Math.floor(rng() * (RESOURCE_AMOUNT.foodMax - RESOURCE_AMOUNT.foodMin)) + RESOURCE_AMOUNT.foodMin;
+      return { hasResource: true, resourceType: ResourceType.Food, resourceAmount };
+    }
+    rng(); // consume amount roll to keep rng sequence length consistent
+    return { hasResource: false, resourceType: ResourceType.None, resourceAmount: 0 };
   }
 
-  if (type === TileType.Stone && rng() < RESOURCE_SPAWN_CHANCE.stone) {
-    const resourceAmount = Math.floor(rng() * (RESOURCE_AMOUNT.stoneMax - RESOURCE_AMOUNT.stoneMin)) + RESOURCE_AMOUNT.stoneMin;
-
-    return { hasResource: true, resourceType: ResourceType.Stone, resourceAmount };
+  if (type === TileType.Stone) {
+    const roll = rng();
+    if (roll < RESOURCE_SPAWN_CHANCE.stone) {
+      const resourceAmount = Math.floor(rng() * (RESOURCE_AMOUNT.stoneMax - RESOURCE_AMOUNT.stoneMin)) + RESOURCE_AMOUNT.stoneMin;
+      return { hasResource: true, resourceType: ResourceType.Stone, resourceAmount };
+    }
+    if (roll < RESOURCE_SPAWN_CHANCE.stone + RESOURCE_SPAWN_CHANCE.ore) {
+      const resourceAmount = Math.floor(rng() * (RESOURCE_AMOUNT.oreMax - RESOURCE_AMOUNT.oreMin)) + RESOURCE_AMOUNT.oreMin;
+      return { hasResource: true, resourceType: ResourceType.Ore, resourceAmount };
+    }
+    rng();
+    return { hasResource: false, resourceType: ResourceType.None, resourceAmount: 0 };
   }
 
   return { hasResource: false, resourceType: ResourceType.None, resourceAmount: 0 };

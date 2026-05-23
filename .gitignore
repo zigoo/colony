@@ -23,4 +23,7 @@ yarn-error.log*
 /tmp
 
 # Claude Code local settings (personal, not shared)
-.claude/settings.local.json.vite/
+.claude/
+
+# Vite dev server cache
+.vite/
