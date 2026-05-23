@@ -1,13 +1,49 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store';
-import { screenToGrid } from '../game/isoMath';
-import { MAP_COLS, MAP_ROWS, CAMERA_ZOOM_STEP_IN, CAMERA_ZOOM_STEP_OUT, MIN_DRAG_DISTANCE } from '../game/constants';
+import { screenToGrid, screenToWorld, gridToWorld, isWithinBounds } from '../game/isoMath';
+import { CAMERA_ZOOM_STEP_IN, CAMERA_ZOOM_STEP_OUT, MIN_DRAG_DISTANCE, ANIMATION_FRAME_SIZE, SPRITE_Y_OFFSET } from '../game/constants';
+import type { Unit } from '../game/types';
+
+const SPRITE_HIT = ANIMATION_FRAME_SIZE['idle'];
+
+// Returns the frontmost unit whose sprite contains the given world-space point.
+// Sprites render with feet at (wx, wy) and body extending upward by frameHeight.
+// Iterates front-to-back (highest row+col first) so overlapping units pick correctly.
+const findUnitAtWorld = (
+  worldX: number,
+  worldY: number,
+  units: Record<string, Unit>,
+): string | undefined => {
+  const sorted = Object.values(units).sort((a, b) => (b.row + b.col) - (a.row + a.col));
+
+  for (const unit of sorted) {
+    const col = unit.prevCol + (unit.col - unit.prevCol) * unit.moveProgress;
+    const row = unit.prevRow + (unit.row - unit.prevRow) * unit.moveProgress;
+    const { x: wx, y: wy } = gridToWorld(col, row);
+
+    if (
+      worldX >= wx - SPRITE_HIT.width / 2 &&
+      worldX <= wx + SPRITE_HIT.width / 2 &&
+      worldY >= wy - SPRITE_HIT.height + SPRITE_Y_OFFSET &&
+      worldY <= wy + SPRITE_Y_OFFSET
+    ) {
+      return unit.id;
+    }
+  }
+
+  return undefined;
+};
 
 export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): void => {
-  const { panCamera, zoomCamera, setScreenSize, selectTile } = useStore();
+  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnit, moveUnitTo, rebuildOccupants } = useStore();
   const isDragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
   const hasMoved = useRef(false);
+
+  // Rebuild occupants after localStorage rehydration (units are persisted, occupants are not)
+  useEffect(() => {
+    rebuildOccupants();
+  }, [rebuildOccupants]);
 
   useEffect(() => {
     const el = canvas.current;
@@ -30,16 +66,36 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
 
     const onMouseUp = (e: MouseEvent) => {
       if (isDragging.current && !hasMoved.current) {
-        const { camera } = useStore.getState();
-        const { col, row } = screenToGrid(
+        const { camera, game, ui } = useStore.getState();
+
+        const worldPos = screenToWorld(
           e.clientX, e.clientY,
           camera.x, camera.y, camera.zoom,
           camera.screenWidth, camera.screenHeight,
         );
-        if (col >= 0 && row >= 0 && col < MAP_COLS && row < MAP_ROWS) {
-          selectTile(col, row);
+
+        const clickedUnitId = findUnitAtWorld(worldPos.x, worldPos.y, game.units);
+
+        if (clickedUnitId) {
+          selectUnit(clickedUnitId === ui.selectedUnitId ? null : clickedUnitId);
         } else {
-          selectTile(null, null);
+          const { col, row } = screenToGrid(
+            e.clientX, e.clientY,
+            camera.x, camera.y, camera.zoom,
+            camera.screenWidth, camera.screenHeight,
+          );
+
+          if (isWithinBounds(col, row)) {
+            if (ui.selectedUnitId) {
+              moveUnitTo(ui.selectedUnitId, col, row);
+              if (!e.metaKey) selectUnit(null);
+            } else {
+              selectTile(col, row);
+            }
+          } else {
+            selectTile(null, null);
+            selectUnit(null);
+          }
         }
       }
 
@@ -71,5 +127,5 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       el.removeEventListener('wheel', onWheel);
       window.removeEventListener('resize', onResize);
     };
-  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile]);
+  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnit, moveUnitTo]);
 };
