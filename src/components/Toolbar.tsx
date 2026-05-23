@@ -1,7 +1,12 @@
 import { useStore, spawnAtCenter } from '../store';
 import { saveToFile, loadFromFile } from '../game/saveLoad';
 
-export const Toolbar = () => {
+interface ToolbarProps {
+  minimapVisible: boolean;
+  onToggleMinimap: () => void;
+}
+
+export const Toolbar = ({ minimapVisible, onToggleMinimap }: ToolbarProps) => {
   const { generateNewMap, loadGameState, saveTimestamp, game, ui } = useStore();
   const selectedUnit = ui.selectedUnitId ? game.units[ui.selectedUnitId] : null;
 
@@ -74,6 +79,26 @@ export const Toolbar = () => {
           ? `unit: ${selectedUnit.id} | ${selectedUnit.state} | (${selectedUnit.col},${selectedUnit.row}) | path: ${selectedUnit.path.length}`
           : 'no unit selected'}
       </span>
+
+      <div style={{ width: 1, background: 'rgba(255,255,255,0.15)', alignSelf: 'stretch', marginLeft: 8 }} />
+
+      <button
+        onClick={onToggleMinimap}
+        style={{
+          padding: '8px 20px',
+          background: minimapVisible ? 'rgba(80, 200, 255, 0.25)' : 'rgba(30, 30, 60, 0.9)',
+          color: minimapVisible ? 'rgba(80, 200, 255, 0.9)' : 'rgba(255,255,255,0.5)',
+          border: `1px solid ${minimapVisible ? 'rgba(80, 200, 255, 0.5)' : 'rgba(255,255,255,0.2)'}`,
+          borderRadius: '6px',
+          cursor: 'pointer',
+          fontFamily: 'monospace',
+          fontSize: '13px',
+        }}
+        onMouseEnter={event => (event.currentTarget.style.background = minimapVisible ? 'rgba(80, 200, 255, 0.35)' : 'rgba(60, 60, 120, 0.95)')}
+        onMouseLeave={event => (event.currentTarget.style.background = minimapVisible ? 'rgba(80, 200, 255, 0.25)' : 'rgba(30, 30, 60, 0.9)')}
+      >
+        Minimap
+      </button>
     </div>
   );
 };

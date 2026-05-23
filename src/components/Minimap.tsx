@@ -74,7 +74,7 @@ export const Minimap = () => {
   return (
     <div style={{
       position: 'fixed',
-      top: 16,
+      top: 36,
       left: 16,
       width: SIZE,
       height: SIZE,
