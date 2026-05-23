@@ -1,8 +1,9 @@
-import { useStore } from '../store';
+import { useStore, spawnAtCenter } from '../store';
 import { saveToFile, loadFromFile } from '../game/saveLoad';
 
 export const Toolbar = () => {
-  const { generateNewMap, loadGameState, saveTimestamp, game } = useStore();
+  const { generateNewMap, loadGameState, saveTimestamp, game, ui } = useStore();
+  const selectedUnit = ui.selectedUnitId ? game.units[ui.selectedUnitId] : null;
 
   const handleSave = async () => {
     try {
@@ -22,17 +23,20 @@ export const Toolbar = () => {
     }
   };
 
+  const buttons = [
+    { label: 'New Map',    onClick: () => generateNewMap() },
+    { label: 'Spawn Unit', onClick: () => spawnAtCenter() },
+    { label: 'Save',       onClick: handleSave },
+    { label: 'Load',       onClick: handleLoad },
+  ];
+
   return (
     <div style={{
       position: 'fixed', bottom: 16, left: '50%', transform: 'translateX(-50%)',
       display: 'flex', gap: '8px',
       zIndex: 10,
     }}>
-      {[
-        { label: 'New Map', onClick: () => generateNewMap() },
-        { label: 'Save', onClick: handleSave },
-        { label: 'Load', onClick: handleLoad },
-      ].map(({ label, onClick }) => (
+      {buttons.map(({ label, onClick }) => (
         <button
           key={label}
           onClick={onClick}
@@ -58,6 +62,18 @@ export const Toolbar = () => {
           Saved {new Date(game.savedAt).toLocaleTimeString()}
         </span>
       )}
+
+      <span style={{
+        color: selectedUnit ? '#aaffaa' : 'rgba(255,255,255,0.35)',
+        fontSize: '11px',
+        alignSelf: 'center',
+        fontFamily: 'monospace',
+        marginLeft: 8,
+      }}>
+        {selectedUnit
+          ? `unit: ${selectedUnit.id} | ${selectedUnit.state} | (${selectedUnit.col},${selectedUnit.row}) | path: ${selectedUnit.path.length}`
+          : 'no unit selected'}
+      </span>
     </div>
   );
 };
