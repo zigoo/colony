@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, devtools } from 'zustand/middleware';
 import { generateMap } from '../game/mapGenerator';
 import { ResourceType, UnitType, UnitState, Direction } from '../game/types';
 import type { GameState, CameraState, UIState, Unit } from '../game/types';
@@ -77,180 +77,183 @@ const buildOccupants = (units: Record<string, Unit>): Record<string, string> => 
 };
 
 export const useStore = create<Store>()(
-  persist(
-    (set, get) => ({
-      game: initialGame,
-      camera: createCamera(window.innerWidth, window.innerHeight),
-      ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null },
-      occupants: {},
+  devtools(
+    persist(
+      (set, get) => ({
+        game: initialGame,
+        camera: createCamera(window.innerWidth, window.innerHeight),
+        ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null },
+        occupants: {},
 
-      generateNewMap: (seed) => {
-        set((state) => ({
-          game: { ...state.game, map: generateMap(seed), tick: 0, savedAt: null, units: {} },
-          occupants: {},
-          ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null },
-        }));
-      },
+        generateNewMap: (seed) => {
+          set((state) => ({
+            game: { ...state.game, map: generateMap(seed), tick: 0, savedAt: null, units: {} },
+            occupants: {},
+            ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null },
+          }), false, 'generateNewMap');
+        },
 
-      loadGameState: (game) => {
-        set({ game, occupants: buildOccupants(game.units), ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null } });
-      },
+        loadGameState: (game) => {
+          set({ game, occupants: buildOccupants(game.units), ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null } }, false, 'loadGameState');
+        },
 
-      rebuildOccupants: () => {
-        set((state) => ({ occupants: buildOccupants(state.game.units) }));
-      },
+        rebuildOccupants: () => {
+          set((state) => ({ occupants: buildOccupants(state.game.units) }), false, 'rebuildOccupants');
+        },
 
-      saveTimestamp: () => {
-        set((state) => ({ game: { ...state.game, savedAt: Date.now() } }));
-      },
+        saveTimestamp: () => {
+          set((state) => ({ game: { ...state.game, savedAt: Date.now() } }), false, 'saveTimestamp');
+        },
 
-      panCamera: (dx, dy) => {
-        set((state) => ({
-          camera: {
-            ...state.camera,
-            x: state.camera.x - dx / state.camera.zoom,
-            y: state.camera.y - dy / state.camera.zoom,
-          },
-        }));
-      },
-
-      zoomCamera: (factor, pivotX, pivotY) => {
-        set((state) => {
-          const camera = state.camera;
-          const newZoom = Math.max(CAMERA_MIN_ZOOM, Math.min(CAMERA_MAX_ZOOM, camera.zoom * factor));
-          const wx = (pivotX - camera.screenWidth / 2) / camera.zoom + camera.x;
-          const wy = (pivotY - camera.screenHeight / 2) / camera.zoom + camera.y;
-
-          return {
+        panCamera: (dx, dy) => {
+          set((state) => ({
             camera: {
-              ...camera,
-              zoom: newZoom,
-              x: wx - (pivotX - camera.screenWidth / 2) / newZoom,
-              y: wy - (pivotY - camera.screenHeight / 2) / newZoom,
+              ...state.camera,
+              x: state.camera.x - dx / state.camera.zoom,
+              y: state.camera.y - dy / state.camera.zoom,
             },
-          };
-        });
-      },
+          }), false, 'panCamera');
+        },
 
-      setScreenSize: (width, height) => {
-        set((state) => ({
-          camera: { ...state.camera, screenWidth: width, screenHeight: height },
-        }));
-      },
+        zoomCamera: (factor, pivotX, pivotY) => {
+          set((state) => {
+            const camera = state.camera;
+            const newZoom = Math.max(CAMERA_MIN_ZOOM, Math.min(CAMERA_MAX_ZOOM, camera.zoom * factor));
+            const wx = (pivotX - camera.screenWidth / 2) / camera.zoom + camera.x;
+            const wy = (pivotY - camera.screenHeight / 2) / camera.zoom + camera.y;
 
-      selectTile: (col, row) => {
-        set((state) => ({ ui: { ...state.ui, selectedCol: col, selectedRow: row } }));
-      },
+            return {
+              camera: {
+                ...camera,
+                zoom: newZoom,
+                x: wx - (pivotX - camera.screenWidth / 2) / newZoom,
+                y: wy - (pivotY - camera.screenHeight / 2) / newZoom,
+              },
+            };
+          }, false, 'zoomCamera');
+        },
 
-      selectUnits: (ids) => {
-        set((state) => ({
-          ui: { ...state.ui, selectedUnitIds: ids, selectedCol: null, selectedRow: null },
-        }));
-      },
+        setScreenSize: (width, height) => {
+          set((state) => ({
+            camera: { ...state.camera, screenWidth: width, screenHeight: height },
+          }), false, 'setScreenSize');
+        },
 
-      setSelectionBox: (box) => {
-        set((state) => ({ ui: { ...state.ui, selectionBox: box } }));
-      },
+        selectTile: (col, row) => {
+          set((state) => ({ ui: { ...state.ui, selectedCol: col, selectedRow: row } }), false, 'selectTile');
+        },
 
-      spawnUnit: (col, row) => {
-        const unit = makeUnit(col, row);
-        set((state) => ({
-          game: { ...state.game, units: { ...state.game.units, [unit.id]: unit } },
-          occupants: { ...state.occupants, [`${col},${row}`]: unit.id },
-        }));
+        selectUnits: (ids) => {
+          set((state) => ({
+            ui: { ...state.ui, selectedUnitIds: ids, selectedCol: null, selectedRow: null },
+          }), false, 'selectUnits');
+        },
 
-        return unit.id;
-      },
+        setSelectionBox: (box) => {
+          set((state) => ({ ui: { ...state.ui, selectionBox: box } }), false, 'setSelectionBox');
+        },
 
-      moveUnitTo: (id, targetCol, targetRow, delayTicks = 0) => {
-        const { game } = get();
-        const unit = game.units[id];
-        if (!unit) return;
+        spawnUnit: (col, row) => {
+          const unit = makeUnit(col, row);
+          set((state) => ({
+            game: { ...state.game, units: { ...state.game.units, [unit.id]: unit } },
+            occupants: { ...state.occupants, [`${col},${row}`]: unit.id },
+          }), false, 'spawnUnit');
 
-        const path = findPath(game.map, unit.col, unit.row, targetCol, targetRow);
-        if (path.length === 0) return;
+          return unit.id;
+        },
 
-        set((state) => ({
-          game: {
-            ...state.game,
-            units: {
-              ...state.game.units,
-              [id]: {
-                ...unit,
-                targetCol, targetRow,
-                path,
-                moveTickDelay: delayTicks,
-                state: delayTicks > 0 ? UnitState.Idle : UnitState.Moving,
+        moveUnitTo: (id, targetCol, targetRow, delayTicks = 0) => {
+          const { game } = get();
+          const unit = game.units[id];
+          if (!unit) return;
+
+          const path = findPath(game.map, unit.col, unit.row, targetCol, targetRow);
+          if (path.length === 0) return;
+
+          set((state) => ({
+            game: {
+              ...state.game,
+              units: {
+                ...state.game.units,
+                [id]: {
+                  ...unit,
+                  targetCol, targetRow,
+                  path,
+                  moveTickDelay: delayTicks,
+                  state: delayTicks > 0 ? UnitState.Idle : UnitState.Moving,
+                },
               },
             },
-          },
-        }));
-      },
+          }), false, 'moveUnitTo');
+        },
 
-      tickUnits: () => {
-        set((state) => {
-          const units = { ...state.game.units };
-          const occupants = { ...state.occupants };
-          let changed = false;
+        tickUnits: () => {
+          set((state) => {
+            const units = { ...state.game.units };
+            const occupants = { ...state.occupants };
+            let changed = false;
 
-          for (const id of Object.keys(units)) {
-            const unit = units[id];
+            for (const id of Object.keys(units)) {
+              const unit = units[id];
 
-            if (unit.moveTickDelay > 0) {
-              const newDelay = unit.moveTickDelay - 1;
-              units[id] = {
-                ...unit,
-                moveTickDelay: newDelay,
-                state: newDelay === 0 ? UnitState.Moving : UnitState.Idle,
-              };
+              if (unit.moveTickDelay > 0) {
+                const newDelay = unit.moveTickDelay - 1;
+                units[id] = {
+                  ...unit,
+                  moveTickDelay: newDelay,
+                  state: newDelay === 0 ? UnitState.Moving : UnitState.Idle,
+                };
+                changed = true;
+                continue;
+              }
+
+              if (unit.state !== UnitState.Moving || unit.path.length === 0) continue;
+
+              const newProgress = unit.moveProgress + 1 / UNIT_MOVE_TICKS;
+
+              if (newProgress >= 1) {
+                const [next, ...remaining] = unit.path;
+                const facing = getDirection(next.col - unit.col, next.row - unit.row);
+
+                delete occupants[`${unit.col},${unit.row}`];
+                occupants[`${next.col},${next.row}`] = id;
+
+                const microDelay = remaining.length > 0 && Math.random() < 0.25 ? 1 : 0;
+
+                units[id] = {
+                  ...unit,
+                  prevCol: unit.col,
+                  prevRow: unit.row,
+                  col: next.col,
+                  row: next.row,
+                  path: remaining,
+                  // Use 1 when becoming idle: interpolation at 1 = col/row (destination),
+                  // at 0 it would render at prevCol (one tile back) since tickUnits stops running.
+                  moveProgress: remaining.length === 0 ? 1 : 0,
+                  facing,
+                  moveTickDelay: microDelay,
+                  state: remaining.length === 0 ? UnitState.Idle : microDelay > 0 ? UnitState.Idle : UnitState.Moving,
+                };
+              } else {
+                units[id] = { ...unit, moveProgress: newProgress };
+              }
+
               changed = true;
-              continue;
             }
 
-            if (unit.state !== UnitState.Moving || unit.path.length === 0) continue;
+            if (!changed) return state;
 
-            const newProgress = unit.moveProgress + 1 / UNIT_MOVE_TICKS;
-
-            if (newProgress >= 1) {
-              const [next, ...remaining] = unit.path;
-              const facing = getDirection(next.col - unit.col, next.row - unit.row);
-
-              delete occupants[`${unit.col},${unit.row}`];
-              occupants[`${next.col},${next.row}`] = id;
-
-              const microDelay = remaining.length > 0 && Math.random() < 0.25 ? 1 : 0;
-
-              units[id] = {
-                ...unit,
-                prevCol: unit.col,
-                prevRow: unit.row,
-                col: next.col,
-                row: next.row,
-                path: remaining,
-                // Use 1 when becoming idle: interpolation at 1 = col/row (destination),
-                // at 0 it would render at prevCol (one tile back) since tickUnits stops running.
-                moveProgress: remaining.length === 0 ? 1 : 0,
-                facing,
-                moveTickDelay: microDelay,
-                state: remaining.length === 0 ? UnitState.Idle : microDelay > 0 ? UnitState.Idle : UnitState.Moving,
-              };
-            } else {
-              units[id] = { ...unit, moveProgress: newProgress };
-            }
-
-            changed = true;
-          }
-
-          if (!changed) return state;
-
-          return { game: { ...state.game, units, tick: state.game.tick + 1 }, occupants };
-        });
+            return { game: { ...state.game, units, tick: state.game.tick + 1 }, occupants };
+          }, false, 'tickUnits');
+        },
+      }),
+      {
+        name: 'settlers-v1',
+        partialize: (state) => ({ game: state.game }),
       },
-    }),
-    {
-      name: 'settlers-v1',
-      partialize: (state) => ({ game: state.game }),
-    },
+    ),
+    { name: 'settlers' },
   ),
 );
 
