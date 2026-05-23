@@ -3,7 +3,7 @@ import { useGameLoop } from '../hooks/useGameLoop';
 import { useCamera } from '../hooks/useCamera';
 import { useStore } from '../store';
 
-export function GameCanvas() {
+export const GameCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const setScreenSize = useStore((s) => s.setScreenSize);
 
@@ -24,4 +24,4 @@ export function GameCanvas() {
       style={{ display: 'block', cursor: 'grab', userSelect: 'none' }}
     />
   );
-}
+};

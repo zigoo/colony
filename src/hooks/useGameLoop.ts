@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { render } from '../renderer/Renderer';
 import { useStore } from '../store';
 
-export function useGameLoop(canvas: React.RefObject<HTMLCanvasElement | null>): void {
+export const useGameLoop = (canvas: React.RefObject<HTMLCanvasElement | null>): void => {
   const storeRef = useRef(useStore.getState);
 
   useEffect(() => {
@@ -26,6 +26,7 @@ export function useGameLoop(canvas: React.RefObject<HTMLCanvasElement | null>): 
     };
 
     rafId = requestAnimationFrame(loop);
+
     return () => cancelAnimationFrame(rafId);
   }, [canvas]);
-}
+};

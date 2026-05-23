@@ -1,12 +1,12 @@
 import type { CameraState } from '../../game/types';
 import { isoCorners } from '../../game/isoMath';
 
-export function renderSelection(
+export const renderSelection = (
   ctx: CanvasRenderingContext2D,
   selectedCol: number | null,
   selectedRow: number | null,
-  cam: CameraState
-): void {
+  camera: CameraState,
+): void => {
   if (selectedCol === null || selectedRow === null) return;
 
   const corners = isoCorners(selectedCol, selectedRow);
@@ -17,9 +17,10 @@ export function renderSelection(
     ctx.lineTo(corners[i].x, corners[i].y);
   }
   ctx.closePath();
+
   ctx.strokeStyle = '#ffdd00';
-  ctx.lineWidth = 2 / cam.zoom;
+  ctx.lineWidth = 2 / camera.zoom;
   ctx.stroke();
   ctx.fillStyle = 'rgba(255, 221, 0, 0.15)';
   ctx.fill();
-}
+};

@@ -3,13 +3,13 @@ import { renderTiles } from './layers/TileLayer';
 import { renderResources } from './layers/ResourceLayer';
 import { renderSelection } from './layers/SelectionLayer';
 
-export function render(
+export const render = (
   ctx: CanvasRenderingContext2D,
   state: GameState,
-  cam: CameraState,
-  ui: UIState
-): void {
-  const { screenWidth, screenHeight, x: camX, y: camY, zoom } = cam;
+  camera: CameraState,
+  ui: UIState,
+): void => {
+  const { screenWidth, screenHeight, x: camX, y: camY, zoom } = camera;
 
   ctx.clearRect(0, 0, screenWidth, screenHeight);
 
@@ -19,11 +19,11 @@ export function render(
   ctx.scale(zoom, zoom);
   ctx.translate(-camX, -camY);
 
-  renderTiles(ctx, state.map, cam);
-  renderResources(ctx, state.map, cam);
-  renderSelection(ctx, ui.selectedCol, ui.selectedRow, cam);
+  renderTiles(ctx, state.map, camera);
+  renderResources(ctx, state.map, camera);
+  renderSelection(ctx, ui.selectedCol, ui.selectedRow, camera);
 
   // Future: renderBuildings, renderUnits here
 
   ctx.restore();
-}
+};

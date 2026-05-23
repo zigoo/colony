@@ -1,23 +1,23 @@
 import type { CameraState } from '../game/types';
+import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM } from '../game/constants';
 
-export function createCamera(screenWidth: number, screenHeight: number): CameraState {
-  return {
-    x: 0,
-    y: 0,
-    zoom: 1,
-    minZoom: 0.25,
-    maxZoom: 3,
-    screenWidth,
-    screenHeight,
-  };
-}
+export const createCamera = (screenWidth: number, screenHeight: number): CameraState => ({
+  screenWidth,
+  screenHeight,
+  x: 0,
+  y: 0,
+  zoom: 1,
+  minZoom: CAMERA_MIN_ZOOM,
+  maxZoom: CAMERA_MAX_ZOOM,
+});
 
-export function clampCamera(cam: CameraState, mapWorldW: number, mapWorldH: number): CameraState {
-  const halfW = cam.screenWidth / 2 / cam.zoom;
-  const halfH = cam.screenHeight / 2 / cam.zoom;
+export const clampCamera = (camera: CameraState, worldWidth: number, worldHeight: number): CameraState => {
+  const halfWidth = camera.screenWidth / 2 / camera.zoom;
+  const halfHeight = camera.screenHeight / 2 / camera.zoom;
+
   return {
-    ...cam,
-    x: Math.max(-halfW, Math.min(mapWorldW + halfW, cam.x)),
-    y: Math.max(-halfH, Math.min(mapWorldH + halfH, cam.y)),
+    ...camera,
+    x: Math.max(-halfWidth, Math.min(worldWidth + halfWidth, camera.x)),
+    y: Math.max(-halfHeight, Math.min(worldHeight + halfHeight, camera.y)),
   };
-}
+};

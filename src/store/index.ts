@@ -1,8 +1,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { generateMap } from '../game/mapGenerator';
+import { ResourceType } from '../game/types';
 import type { GameState, CameraState, UIState } from '../game/types';
+import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM } from '../game/constants';
 import { createCamera } from '../renderer/Camera';
+
+export const PLAYER_ID = 'player1';
 
 interface Store {
   game: GameState;
@@ -15,18 +19,24 @@ interface Store {
 
   panCamera: (dx: number, dy: number) => void;
   zoomCamera: (factor: number, pivotX: number, pivotY: number) => void;
-  setScreenSize: (w: number, h: number) => void;
+  setScreenSize: (width: number, height: number) => void;
 
   selectTile: (col: number | null, row: number | null) => void;
 }
 
-const initialMap = generateMap();
-
 const initialGame: GameState = {
-  map: initialMap,
+  map: generateMap(),
   buildings: {},
   units: {},
-  resources: { player1: { wood: 0, stone: 0, food: 0, ore: 0 } },
+  resources: {
+    [PLAYER_ID]: {
+      [ResourceType.Wood]:  0,
+      [ResourceType.Stone]: 0,
+      [ResourceType.Food]:  0,
+      [ResourceType.Ore]:   0,
+      [ResourceType.None]:  0,
+    },
+  },
   tick: 0,
   tickRate: 10,
   savedAt: null,
@@ -40,46 +50,52 @@ export const useStore = create<Store>()(
       ui: { selectedCol: null, selectedRow: null },
 
       generateNewMap: (seed) => {
-        set((s) => ({
-          game: { ...s.game, map: generateMap(seed), tick: 0, savedAt: null },
+        set((state) => ({
+          game: { ...state.game, map: generateMap(seed), tick: 0, savedAt: null },
           ui: { selectedCol: null, selectedRow: null },
         }));
       },
 
-      loadGameState: (state) => {
-        set({ game: state, ui: { selectedCol: null, selectedRow: null } });
+      loadGameState: (game) => {
+        set({ game, ui: { selectedCol: null, selectedRow: null } });
       },
 
       saveTimestamp: () => {
-        set((s) => ({ game: { ...s.game, savedAt: Date.now() } }));
+        set((state) => ({ game: { ...state.game, savedAt: Date.now() } }));
       },
 
       panCamera: (dx, dy) => {
-        set((s) => ({
-          camera: { ...s.camera, x: s.camera.x - dx / s.camera.zoom, y: s.camera.y - dy / s.camera.zoom },
+        set((state) => ({
+          camera: {
+            ...state.camera,
+            x: state.camera.x - dx / state.camera.zoom,
+            y: state.camera.y - dy / state.camera.zoom,
+          },
         }));
       },
 
       zoomCamera: (factor, pivotX, pivotY) => {
-        set((s) => {
-          const cam = s.camera;
-          const newZoom = Math.max(cam.minZoom, Math.min(cam.maxZoom, cam.zoom * factor));
-          // Zoom toward cursor: shift camera so pivot stays fixed
-          const wx = (pivotX - cam.screenWidth / 2) / cam.zoom + cam.x;
-          const wy = (pivotY - cam.screenHeight / 2) / cam.zoom + cam.y;
+        set((state) => {
+          const camera = state.camera;
+          const newZoom = Math.max(CAMERA_MIN_ZOOM, Math.min(CAMERA_MAX_ZOOM, camera.zoom * factor));
+          const wx = (pivotX - camera.screenWidth / 2) / camera.zoom + camera.x;
+          const wy = (pivotY - camera.screenHeight / 2) / camera.zoom + camera.y;
+
           return {
             camera: {
-              ...cam,
+              ...camera,
               zoom: newZoom,
-              x: wx - (pivotX - cam.screenWidth / 2) / newZoom,
-              y: wy - (pivotY - cam.screenHeight / 2) / newZoom,
+              x: wx - (pivotX - camera.screenWidth / 2) / newZoom,
+              y: wy - (pivotY - camera.screenHeight / 2) / newZoom,
             },
           };
         });
       },
 
-      setScreenSize: (w, h) => {
-        set((s) => ({ camera: { ...s.camera, screenWidth: w, screenHeight: h } }));
+      setScreenSize: (width, height) => {
+        set((state) => ({
+          camera: { ...state.camera, screenWidth: width, screenHeight: height },
+        }));
       },
 
       selectTile: (col, row) => {
@@ -88,7 +104,7 @@ export const useStore = create<Store>()(
     }),
     {
       name: 'settlers-v1',
-      partialize: (s) => ({ game: s.game }),
-    }
-  )
+      partialize: (state) => ({ game: state.game }),
+    },
+  ),
 );

@@ -1,14 +1,16 @@
-import { useStore } from '../store';
+import { useStore, PLAYER_ID } from '../store';
+import { ResourceType } from '../game/types';
 
-export function HUD() {
-  const resources = useStore((s) => s.game.resources['player1']);
-  const selectedCol = useStore((s) => s.ui.selectedCol);
-  const selectedRow = useStore((s) => s.ui.selectedRow);
-  const map = useStore((s) => s.game.map);
+export const HUD = () => {
+  const resources = useStore((state) => state.game.resources[PLAYER_ID]);
+  const selectedCol = useStore((state) => state.ui.selectedCol);
+  const selectedRow = useStore((state) => state.ui.selectedRow);
+  const map = useStore((state) => state.game.map);
 
-  const selectedTile = selectedCol !== null && selectedRow !== null
-    ? map.tiles[`${selectedCol},${selectedRow}`]
-    : null;
+  const selectedTile =
+    selectedCol !== null && selectedRow !== null
+      ? map.tiles[`${selectedCol},${selectedRow}`]
+      : null;
 
   return (
     <div style={{
@@ -23,11 +25,12 @@ export function HUD() {
       zIndex: 10,
     }}>
       <div style={{ display: 'flex', gap: '20px' }}>
-        <span>Wood: {resources?.wood ?? 0}</span>
-        <span>Stone: {resources?.stone ?? 0}</span>
-        <span>Food: {resources?.food ?? 0}</span>
-        <span>Ore: {resources?.ore ?? 0}</span>
+        <span>Wood: {resources?.[ResourceType.Wood] ?? 0}</span>
+        <span>Stone: {resources?.[ResourceType.Stone] ?? 0}</span>
+        <span>Food: {resources?.[ResourceType.Food] ?? 0}</span>
+        <span>Ore: {resources?.[ResourceType.Ore] ?? 0}</span>
       </div>
+
       {selectedTile && (
         <div style={{ textAlign: 'center' }}>
           <strong>{selectedTile.type}</strong>
@@ -39,7 +42,8 @@ export function HUD() {
           )}
         </div>
       )}
+
       <div style={{ opacity: 0.6 }}>Drag to pan · Scroll to zoom</div>
     </div>
   );
-}
+};

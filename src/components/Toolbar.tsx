@@ -1,12 +1,16 @@
 import { useStore } from '../store';
 import { saveToFile, loadFromFile } from '../game/saveLoad';
 
-export function Toolbar() {
+export const Toolbar = () => {
   const { generateNewMap, loadGameState, saveTimestamp, game } = useStore();
 
-  const handleSave = () => {
-    saveTimestamp();
-    saveToFile(useStore.getState().game);
+  const handleSave = async () => {
+    try {
+      saveTimestamp();
+      await saveToFile(useStore.getState().game);
+    } catch (e) {
+      console.error('Save failed:', e);
+    }
   };
 
   const handleLoad = async () => {
@@ -48,6 +52,7 @@ export function Toolbar() {
           {label}
         </button>
       ))}
+
       {game.savedAt && (
         <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '11px', alignSelf: 'center', fontFamily: 'monospace' }}>
           Saved {new Date(game.savedAt).toLocaleTimeString()}
@@ -55,4 +60,4 @@ export function Toolbar() {
       )}
     </div>
   );
-}
+};

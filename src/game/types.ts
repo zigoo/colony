@@ -1,9 +1,50 @@
-export type TileType = 'WATER' | 'GRASS' | 'FOREST' | 'MOUNTAIN' | 'STONE' | 'SAND';
-export type ResourceType = 'WOOD' | 'STONE' | 'FOOD' | 'ORE' | 'NONE';
-export type BuildingType = 'LUMBERCAMP' | 'QUARRY' | 'FARM' | 'SETTLEMENT';
-export type UnitType = 'SETTLER' | 'WORKER' | 'SCOUT';
-export type UnitState = 'IDLE' | 'MOVING' | 'COLLECTING' | 'BUILDING';
-export type Direction = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
+export enum TileType {
+  Water    = 'WATER',
+  Sand     = 'SAND',
+  Grass    = 'GRASS',
+  Forest   = 'FOREST',
+  Stone    = 'STONE',
+  Mountain = 'MOUNTAIN',
+}
+
+export enum ResourceType {
+  Wood  = 'WOOD',
+  Stone = 'STONE',
+  Food  = 'FOOD',
+  Ore   = 'ORE',
+  None  = 'NONE',
+}
+
+export enum BuildingType {
+  LumberCamp = 'LUMBERCAMP',
+  Quarry     = 'QUARRY',
+  Farm       = 'FARM',
+  Settlement = 'SETTLEMENT',
+}
+
+export enum UnitType {
+  Settler = 'SETTLER',
+  Worker  = 'WORKER',
+  Scout   = 'SCOUT',
+}
+
+export enum UnitState {
+  Idle       = 'IDLE',
+  Moving     = 'MOVING',
+  Collecting = 'COLLECTING',
+  Building   = 'BUILDING',
+}
+
+export enum Direction {
+  North     = 'N',
+  NorthEast = 'NE',
+  East      = 'E',
+  SouthEast = 'SE',
+  South     = 'S',
+  SouthWest = 'SW',
+  West      = 'W',
+  NorthWest = 'NW',
+}
 
 export interface Tile {
   col: number;
@@ -50,13 +91,7 @@ export interface Unit {
   facing: Direction;
 }
 
-export interface ResourceInventory {
-  wood: number;
-  stone: number;
-  food: number;
-  ore: number;
-  [key: string]: number;
-}
+export type ResourceInventory = Record<ResourceType, number>;
 
 export interface GameState {
   map: MapState;

@@ -2,14 +2,13 @@ import type { MapState, CameraState } from '../../game/types';
 import { isoCorners, screenToWorld } from '../../game/isoMath';
 import { TILE_COLORS, TILE_W, TILE_H, MAP_COLS, MAP_ROWS } from '../../game/constants';
 
-export function renderTiles(
+export const renderTiles = (
   ctx: CanvasRenderingContext2D,
   map: MapState,
-  cam: CameraState
-): void {
-  const { x: camX, y: camY, zoom, screenWidth, screenHeight } = cam;
+  camera: CameraState,
+): void => {
+  const { x: camX, y: camY, zoom, screenWidth, screenHeight } = camera;
 
-  // Compute visible tile range from screen corners
   const corners = [
     screenToWorld(0, 0, camX, camY, zoom, screenWidth, screenHeight),
     screenToWorld(screenWidth, 0, camX, camY, zoom, screenWidth, screenHeight),
@@ -17,17 +16,16 @@ export function renderTiles(
     screenToWorld(screenWidth, screenHeight, camX, camY, zoom, screenWidth, screenHeight),
   ];
 
-  const HALF_W = TILE_W / 2;
-  const HALF_H = TILE_H / 2;
+  const halfWidth = TILE_W / 2;
+  const halfHeight = TILE_H / 2;
 
-  // World to grid approximate bounds (with padding)
   const allCols = corners.flatMap(c => [
-    Math.floor((c.x / HALF_W + c.y / HALF_H) / 2),
-    Math.ceil((c.x / HALF_W + c.y / HALF_H) / 2),
+    Math.floor((c.x / halfWidth + c.y / halfHeight) / 2),
+    Math.ceil((c.x / halfWidth + c.y / halfHeight) / 2),
   ]);
   const allRows = corners.flatMap(c => [
-    Math.floor((c.y / HALF_H - c.x / HALF_W) / 2),
-    Math.ceil((c.y / HALF_H - c.x / HALF_W) / 2),
+    Math.floor((c.y / halfHeight - c.x / halfWidth) / 2),
+    Math.ceil((c.y / halfHeight - c.x / halfWidth) / 2),
   ]);
 
   const minCol = Math.max(0, Math.min(...allCols) - 2);
@@ -53,10 +51,9 @@ export function renderTiles(
       ctx.fillStyle = color;
       ctx.fill();
 
-      // Subtle grid line
       ctx.strokeStyle = 'rgba(0,0,0,0.15)';
       ctx.lineWidth = 0.5 / zoom;
       ctx.stroke();
     }
   }
-}
+};
