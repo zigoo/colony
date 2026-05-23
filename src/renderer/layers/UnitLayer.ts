@@ -16,6 +16,64 @@ const GOLDEN_ANGLE = 0.6180339887 * Math.PI * 2;
 const animationForState = (state: UnitState): string =>
   state === UnitStateEnum.Moving ? 'walk' : 'idle';
 
+const drawAxe = (
+  ctx: CanvasRenderingContext2D,
+  wx: number,
+  wy: number,
+  offsetX: number,
+  offsetY: number,
+  timestamp: number,
+  zoom: number,
+): void => {
+  // Pivot at unit's hands — slightly right of center, above tile center
+  const pivotX = wx + offsetX + 7;
+  const pivotY = wy + offsetY - 8;
+
+  // Pendulum: slow raise, fast chop impact
+  const t = (timestamp % 500) / 500;
+  const raw = Math.sin(t * Math.PI * 2);
+  // Bias toward impact position to give more "snap" on the downswing
+  const swing = raw - 0.18 * Math.sin(t * Math.PI * 4);
+  const angle = 0.15 + swing * 0.72;
+
+  const handleLen = 16;
+
+  ctx.save();
+  ctx.translate(pivotX, pivotY);
+  ctx.rotate(angle);
+
+  // Handle
+  ctx.fillStyle = '#5C3317';
+  ctx.fillRect(-1.5, 0, 3, handleLen);
+
+  // Axe head — parallelogram shape offset to one side of the handle tip
+  ctx.beginPath();
+  ctx.moveTo(-5, handleLen - 2);
+  ctx.lineTo(-5, handleLen + 5);
+  ctx.lineTo( 6, handleLen + 7);
+  ctx.lineTo( 6, handleLen - 4);
+  ctx.closePath();
+  ctx.fillStyle = '#ADADAD';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+  ctx.lineWidth = 0.8 / zoom;
+  ctx.stroke();
+
+  // Blade edge highlight — the sharp bit
+  ctx.beginPath();
+  ctx.moveTo(6, handleLen - 4);
+  ctx.lineTo(6, handleLen + 7);
+  ctx.strokeStyle = '#E4E4E4';
+  ctx.lineWidth = 1.4 / zoom;
+  ctx.stroke();
+
+  // Grip wrap at pivot end
+  ctx.fillStyle = '#3B1F09';
+  ctx.fillRect(-1.5, 0, 3, 3.5);
+
+  ctx.restore();
+};
+
 const buildTileGroups = (units: Unit[]): Map<string, Unit[]> => {
   const groups = new Map<string, Unit[]>();
   for (const unit of units) {
@@ -135,5 +193,9 @@ export const renderUnits = (
       srcX, srcY, frameWidth, frameHeight,
       wx + offsetX - frameWidth / 2, wy + offsetY - frameHeight + SPRITE_Y_OFFSET, frameWidth, frameHeight,
     );
+
+    if (unit.state === UnitStateEnum.Collecting) {
+      drawAxe(ctx, wx, wy, offsetX, offsetY, timestamp, camera.zoom);
+    }
   }
 };
