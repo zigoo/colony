@@ -1,0 +1,49 @@
+{
+  "animations": {
+    "walk": {
+      "file": "walk.png",
+      "sheetWidth": 512,
+      "sheetHeight": 512,
+      "frameWidth": 64,
+      "frameHeight": 64,
+      "framesPerDirection": 8,
+      "fps": 8,
+      "directions": ["S", "SW", "W", "NW", "N", "NE", "E", "SE"]
+    },
+    "idle": {
+      "file": "idle.png",
+      "sheetWidth": 768,
+      "sheetHeight": 512,
+      "frameWidth": 64,
+      "frameHeight": 64,
+      "framesPerDirection": 12,
+      "fps": 6,
+      "directions": ["S", "SW", "W", "NW", "N", "NE", "E", "SE"]
+    },
+    "attack": {
+      "file": "attack.png",
+      "sheetWidth": 672,
+      "sheetHeight": 768,
+      "frameWidth": 96,
+      "frameHeight": 96,
+      "framesPerDirection": 7,
+      "fps": 10,
+      "directions": ["S", "SW", "W", "NW", "N", "NE", "E", "SE"]
+    },
+    "run": {
+      "file": "run.png",
+      "sheetWidth": 512,
+      "sheetHeight": 512,
+      "frameWidth": 64,
+      "frameHeight": 64,
+      "framesPerDirection": 8,
+      "fps": 12,
+      "directions": ["S", "SW", "W", "NW", "N", "NE", "E", "SE"]
+    }
+  },
+  "_notes": {
+    "directionOrder": "Row index = direction index. Order assumed: row 0=S, 1=SW, 2=W, 3=NW, 4=N, 5=NE, 6=E, 7=SE. Verify by testing in-game and adjust if needed.",
+    "source": "Aseprite source files (.aseprite / .ase) are in src/assets/ — edit there, re-export PNGs here.",
+    "format": "Row = direction, Column = animation frame. Use ctx.drawImage(img, col*fw, row*fh, fw, fh, x, y, fw, fh)"
+  }
+}
