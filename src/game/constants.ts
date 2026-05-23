@@ -1,4 +1,4 @@
-import { TileType, ResourceType } from './types';
+import { TileType, ResourceType, Direction } from './types';
 
 export const TILE_W = 64;
 export const TILE_H = 32;
@@ -52,6 +52,51 @@ export const TILE_COLORS: Record<TileType, string> = {
   [TileType.Stone]:    '#9e9e7a',
   [TileType.Mountain]: '#6e6e6e',
 };
+
+export const UNIT_MOVE_TICKS = 3;
+export const SPRITE_BASE_PATH = '/assets/sprites/units/character';
+
+export const ANIMATION_FPS: Record<string, number> = {
+  idle:   6,
+  walk:   8,
+  run:    12,
+  attack: 10,
+};
+
+export const ANIMATION_FRAMES: Record<string, number> = {
+  idle:   12,
+  walk:   8,
+  run:    8,
+  attack: 7,
+};
+
+export const ANIMATION_FRAME_SIZE: Record<string, { width: number; height: number }> = {
+  idle:   { width: 64, height: 64 },
+  walk:   { width: 64, height: 64 },
+  run:    { width: 64, height: 64 },
+  attack: { width: 96, height: 96 },
+};
+
+export const DIRECTION_ROW: Record<Direction, number> = {
+  [Direction.South]:     0,
+  [Direction.SouthWest]: 1,
+  [Direction.West]:      2,
+  [Direction.NorthWest]: 3,
+  [Direction.North]:     4,
+  [Direction.NorthEast]: 5,
+  [Direction.East]:      6,
+  [Direction.SouthEast]: 7,
+};
+
+export const UNIT_SELECTION_COLOR      = 'rgba(80, 200, 255, 0.9)';
+export const UNIT_SELECTION_FILL       = 'rgba(80, 200, 255, 0.25)';
+export const UNIT_DESTINATION_COLOR    = 'rgba(255, 200, 50, 0.9)';
+export const UNIT_DESTINATION_FILL     = 'rgba(255, 200, 50, 0.12)';
+export const UNIT_DESTINATION_DASH     = 5;   // world-space dash length (scales with zoom)
+
+// Shifts the sprite down so feet align with the tile's bottom diamond vertex (wy + TILE_H/2).
+// Without this the sprite body floats above its tile in isometric view.
+export const SPRITE_Y_OFFSET = TILE_H / 2;
 
 export const RESOURCE_COLORS: Partial<Record<ResourceType, string>> = {
   [ResourceType.Wood]:  '#8B4513',

@@ -81,6 +81,8 @@ export interface Unit {
   ownerId: string;
   col: number;
   row: number;
+  prevCol: number;
+  prevRow: number;
   targetCol: number | null;
   targetRow: number | null;
   path: Array<{ col: number; row: number }>;
@@ -91,7 +93,7 @@ export interface Unit {
   facing: Direction;
 }
 
-export type ResourceInventory = Record<ResourceType, number>;
+export type ResourceInventory = Record<Exclude<ResourceType, ResourceType.None>, number>;
 
 export interface GameState {
   map: MapState;
@@ -116,4 +118,5 @@ export interface CameraState {
 export interface UIState {
   selectedCol: number | null;
   selectedRow: number | null;
+  selectedUnitId: string | null;
 }
