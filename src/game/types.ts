@@ -88,6 +88,7 @@ export interface Unit {
   path: Array<{ col: number; row: number }>;
   state: UnitState;
   moveProgress: number;
+  moveTickDelay: number;
   carrying: ResourceType | null;
   carryingAmount: number;
   facing: Direction;
@@ -118,5 +119,6 @@ export interface CameraState {
 export interface UIState {
   selectedCol: number | null;
   selectedRow: number | null;
-  selectedUnitId: string | null;
+  selectedUnitIds: string[];
+  selectionBox: { x1: number; y1: number; x2: number; y2: number } | null;
 }

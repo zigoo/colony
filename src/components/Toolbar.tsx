@@ -8,7 +8,7 @@ interface ToolbarProps {
 
 export const Toolbar = ({ minimapVisible, onToggleMinimap }: ToolbarProps) => {
   const { generateNewMap, loadGameState, saveTimestamp, game, ui } = useStore();
-  const selectedUnit = ui.selectedUnitId ? game.units[ui.selectedUnitId] : null;
+  const selectedUnits = ui.selectedUnitIds.map(id => game.units[id]).filter(Boolean);
 
   const handleSave = async () => {
     try {
@@ -69,15 +69,15 @@ export const Toolbar = ({ minimapVisible, onToggleMinimap }: ToolbarProps) => {
       )}
 
       <span style={{
-        color: selectedUnit ? '#aaffaa' : 'rgba(255,255,255,0.35)',
+        color: selectedUnits.length > 0 ? '#aaffaa' : 'rgba(255,255,255,0.35)',
         fontSize: '11px',
         alignSelf: 'center',
         fontFamily: 'monospace',
         marginLeft: 8,
       }}>
-        {selectedUnit
-          ? `unit: ${selectedUnit.id} | ${selectedUnit.state} | (${selectedUnit.col},${selectedUnit.row}) | path: ${selectedUnit.path.length}`
-          : 'no unit selected'}
+        {selectedUnits.length === 0 && 'no unit selected'}
+        {selectedUnits.length === 1 && `unit: ${selectedUnits[0].id} | ${selectedUnits[0].state} | (${selectedUnits[0].col},${selectedUnits[0].row}) | path: ${selectedUnits[0].path.length}`}
+        {selectedUnits.length > 1 && `${selectedUnits.length} units selected`}
       </span>
 
       <div style={{ width: 1, background: 'rgba(255,255,255,0.15)', alignSelf: 'stretch', marginLeft: 8 }} />

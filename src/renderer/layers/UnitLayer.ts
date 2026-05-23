@@ -10,8 +10,26 @@ import {
 } from '../../game/constants';
 import { loadSprite } from '../sprites/SpriteLoader';
 
+const UNIT_SPREAD_RADIUS = 18;
+const GOLDEN_ANGLE = 0.6180339887 * Math.PI * 2;
+
 const animationForState = (state: UnitState): string =>
   state === UnitStateEnum.Moving ? 'walk' : 'idle';
+
+const buildTileGroups = (units: Unit[]): Map<string, Unit[]> => {
+  const groups = new Map<string, Unit[]>();
+  for (const unit of units) {
+    const col = unit.prevCol + (unit.col - unit.prevCol) * unit.moveProgress;
+    const row = unit.prevRow + (unit.row - unit.prevRow) * unit.moveProgress;
+    const key = `${Math.round(col)},${Math.round(row)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(unit);
+  }
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.id.localeCompare(b.id));
+  }
+  return groups;
+};
 
 const interpolatedPosition = (unit: Unit): { col: number; row: number } => ({
   col: unit.prevCol + (unit.col - unit.prevCol) * unit.moveProgress,
@@ -70,11 +88,12 @@ const drawSelectionDiamond = (
 export const renderUnits = (
   ctx: CanvasRenderingContext2D,
   units: Record<string, Unit>,
-  selectedUnitId: string | null,
+  selectedUnitIds: string[],
   timestamp: number,
   camera: CameraState,
 ): void => {
   const sorted = Object.values(units).sort((a, b) => (a.row + a.col) - (b.row + b.col));
+  const tileGroups = buildTileGroups(sorted);
 
   // Draw destination markers first (below sprites)
   for (const unit of sorted) {
@@ -87,7 +106,13 @@ export const renderUnits = (
     const { col, row } = interpolatedPosition(unit);
     const { x: wx, y: wy } = gridToWorld(col, row);
 
-    if (unit.id === selectedUnitId) {
+    const tileKey = `${Math.round(col)},${Math.round(row)}`;
+    const group = tileGroups.get(tileKey) ?? [];
+    const slotIndex = group.findIndex(u => u.id === unit.id);
+    const offsetX = group.length <= 1 ? 0 : Math.cos(slotIndex * GOLDEN_ANGLE) * UNIT_SPREAD_RADIUS;
+    const offsetY = group.length <= 1 ? 0 : Math.sin(slotIndex * GOLDEN_ANGLE) * UNIT_SPREAD_RADIUS;
+
+    if (selectedUnitIds.includes(unit.id)) {
       drawSelectionDiamond(ctx, col, row, camera.zoom);
     }
 
@@ -108,7 +133,7 @@ export const renderUnits = (
     ctx.drawImage(
       img,
       srcX, srcY, frameWidth, frameHeight,
-      wx - frameWidth / 2, wy - frameHeight + SPRITE_Y_OFFSET, frameWidth, frameHeight,
+      wx + offsetX - frameWidth / 2, wy + offsetY - frameHeight + SPRITE_Y_OFFSET, frameWidth, frameHeight,
     );
   }
 };

@@ -23,7 +23,7 @@ export const render = (
   renderTiles(ctx, state.map, camera);
   renderResources(ctx, state.map, camera);
   renderSelection(ctx, ui.selectedCol, ui.selectedRow, camera);
-  renderUnits(ctx, state.units, ui.selectedUnitId, timestamp, camera);
+  renderUnits(ctx, state.units, ui.selectedUnitIds, timestamp, camera);
 
   ctx.restore();
 };

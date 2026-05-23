@@ -1,14 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store';
-import { screenToGrid, screenToWorld, gridToWorld, isWithinBounds } from '../game/isoMath';
+import { screenToGrid, screenToWorld, worldToScreen, gridToWorld, isWithinBounds } from '../game/isoMath';
 import { CAMERA_ZOOM_STEP_IN, CAMERA_ZOOM_STEP_OUT, MIN_DRAG_DISTANCE, ANIMATION_FRAME_SIZE, SPRITE_Y_OFFSET } from '../game/constants';
-import type { Unit } from '../game/types';
+import type { Unit, CameraState } from '../game/types';
 
 const SPRITE_HIT = ANIMATION_FRAME_SIZE['idle'];
 
-// Returns the frontmost unit whose sprite contains the given world-space point.
-// Sprites render with feet at (wx, wy) and body extending upward by frameHeight.
-// Iterates front-to-back (highest row+col first) so overlapping units pick correctly.
 const findUnitAtWorld = (
   worldX: number,
   worldY: number,
@@ -34,13 +31,37 @@ const findUnitAtWorld = (
   return undefined;
 };
 
+const findUnitsInScreenBox = (
+  x1: number, y1: number, x2: number, y2: number,
+  units: Record<string, Unit>,
+  camera: CameraState,
+): string[] => {
+  const minX = Math.min(x1, x2);
+  const maxX = Math.max(x1, x2);
+  const minY = Math.min(y1, y2);
+  const maxY = Math.max(y1, y2);
+
+  return Object.values(units)
+    .filter(unit => {
+      const col = unit.prevCol + (unit.col - unit.prevCol) * unit.moveProgress;
+      const row = unit.prevRow + (unit.row - unit.prevRow) * unit.moveProgress;
+      const { x: worldX, y: worldY } = gridToWorld(col, row);
+      const { x: screenX, y: screenY } = worldToScreen(
+        worldX, worldY, camera.x, camera.y, camera.zoom, camera.screenWidth, camera.screenHeight,
+      );
+      return screenX >= minX && screenX <= maxX && screenY >= minY && screenY <= maxY;
+    })
+    .map(unit => unit.id);
+};
+
 export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): void => {
-  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnit, moveUnitTo, rebuildOccupants } = useStore();
+  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, setSelectionBox, moveUnitTo, rebuildOccupants } = useStore();
   const isDragging = useRef(false);
+  const isShiftSelecting = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0 });
   const lastPos = useRef({ x: 0, y: 0 });
   const hasMoved = useRef(false);
 
-  // Rebuild occupants after localStorage rehydration (units are persisted, occupants are not)
   useEffect(() => {
     rebuildOccupants();
   }, [rebuildOccupants]);
@@ -50,51 +71,85 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
     if (!el) return;
 
     const onMouseDown = (e: MouseEvent) => {
-      isDragging.current = true;
       hasMoved.current = false;
+      dragStart.current = { x: e.clientX, y: e.clientY };
       lastPos.current = { x: e.clientX, y: e.clientY };
+
+      if (e.shiftKey) {
+        isShiftSelecting.current = true;
+      } else {
+        isDragging.current = true;
+      }
     };
 
     const onMouseMove = (e: MouseEvent) => {
+      const totalDx = e.clientX - dragStart.current.x;
+      const totalDy = e.clientY - dragStart.current.y;
+      if (Math.abs(totalDx) > MIN_DRAG_DISTANCE || Math.abs(totalDy) > MIN_DRAG_DISTANCE) {
+        hasMoved.current = true;
+      }
+
+      if (isShiftSelecting.current && hasMoved.current) {
+        setSelectionBox({ x1: dragStart.current.x, y1: dragStart.current.y, x2: e.clientX, y2: e.clientY });
+        return;
+      }
+
       if (!isDragging.current) return;
       const dx = e.clientX - lastPos.current.x;
       const dy = e.clientY - lastPos.current.y;
-      if (Math.abs(dx) > MIN_DRAG_DISTANCE || Math.abs(dy) > MIN_DRAG_DISTANCE) hasMoved.current = true;
       panCamera(dx, dy);
       lastPos.current = { x: e.clientX, y: e.clientY };
     };
 
     const onMouseUp = (e: MouseEvent) => {
+      if (isShiftSelecting.current) {
+        isShiftSelecting.current = false;
+        setSelectionBox(null);
+
+        const { game, ui, camera } = useStore.getState();
+
+        if (hasMoved.current) {
+          const ids = findUnitsInScreenBox(
+            dragStart.current.x, dragStart.current.y, e.clientX, e.clientY,
+            game.units, camera,
+          );
+          selectUnits([...new Set([...ui.selectedUnitIds, ...ids])]);
+        } else {
+          // shift+click: toggle one unit
+          const worldPos = screenToWorld(e.clientX, e.clientY, camera.x, camera.y, camera.zoom, camera.screenWidth, camera.screenHeight);
+          const clickedUnitId = findUnitAtWorld(worldPos.x, worldPos.y, game.units);
+          if (clickedUnitId) {
+            const alreadySelected = ui.selectedUnitIds.includes(clickedUnitId);
+            selectUnits(
+              alreadySelected
+                ? ui.selectedUnitIds.filter(id => id !== clickedUnitId)
+                : [...ui.selectedUnitIds, clickedUnitId],
+            );
+          }
+        }
+      }
+
       if (isDragging.current && !hasMoved.current) {
         const { camera, game, ui } = useStore.getState();
-
-        const worldPos = screenToWorld(
-          e.clientX, e.clientY,
-          camera.x, camera.y, camera.zoom,
-          camera.screenWidth, camera.screenHeight,
-        );
-
+        const worldPos = screenToWorld(e.clientX, e.clientY, camera.x, camera.y, camera.zoom, camera.screenWidth, camera.screenHeight);
         const clickedUnitId = findUnitAtWorld(worldPos.x, worldPos.y, game.units);
 
         if (clickedUnitId) {
-          selectUnit(clickedUnitId === ui.selectedUnitId ? null : clickedUnitId);
+          const isOnlySelected = ui.selectedUnitIds.length === 1 && ui.selectedUnitIds[0] === clickedUnitId;
+          selectUnits(isOnlySelected ? [] : [clickedUnitId]);
         } else {
-          const { col, row } = screenToGrid(
-            e.clientX, e.clientY,
-            camera.x, camera.y, camera.zoom,
-            camera.screenWidth, camera.screenHeight,
-          );
+          const { col, row } = screenToGrid(e.clientX, e.clientY, camera.x, camera.y, camera.zoom, camera.screenWidth, camera.screenHeight);
 
           if (isWithinBounds(col, row)) {
-            if (ui.selectedUnitId) {
-              moveUnitTo(ui.selectedUnitId, col, row);
-              if (!e.metaKey) selectUnit(null);
+            if (ui.selectedUnitIds.length > 0) {
+              ui.selectedUnitIds.forEach((id, index) => moveUnitTo(id, col, row, index * 2));
+              if (!e.metaKey) selectUnits([]);
             } else {
               selectTile(col, row);
             }
           } else {
             selectTile(null, null);
-            selectUnit(null);
+            selectUnits([]);
           }
         }
       }
@@ -127,5 +182,5 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       el.removeEventListener('wheel', onWheel);
       window.removeEventListener('resize', onResize);
     };
-  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnit, moveUnitTo]);
+  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, setSelectionBox, moveUnitTo]);
 };

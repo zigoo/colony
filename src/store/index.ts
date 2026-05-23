@@ -26,9 +26,10 @@ interface Store {
   setScreenSize: (width: number, height: number) => void;
 
   selectTile: (col: number | null, row: number | null) => void;
-  selectUnit: (id: string | null) => void;
+  selectUnits: (ids: string[]) => void;
+  setSelectionBox: (box: { x1: number; y1: number; x2: number; y2: number } | null) => void;
   spawnUnit: (col: number, row: number) => string;
-  moveUnitTo: (id: string, col: number, row: number) => void;
+  moveUnitTo: (id: string, col: number, row: number, delayTicks?: number) => void;
   tickUnits: () => void;
   rebuildOccupants: () => void;
 }
@@ -44,6 +45,7 @@ const makeUnit = (col: number, row: number): Unit => ({
   path: [],
   state: UnitState.Idle,
   moveProgress: 0,
+  moveTickDelay: 0,
   carrying: null,
   carryingAmount: 0,
   facing: Direction.South,
@@ -79,19 +81,19 @@ export const useStore = create<Store>()(
     (set, get) => ({
       game: initialGame,
       camera: createCamera(window.innerWidth, window.innerHeight),
-      ui: { selectedCol: null, selectedRow: null, selectedUnitId: null },
+      ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null },
       occupants: {},
 
       generateNewMap: (seed) => {
         set((state) => ({
           game: { ...state.game, map: generateMap(seed), tick: 0, savedAt: null, units: {} },
           occupants: {},
-          ui: { selectedCol: null, selectedRow: null, selectedUnitId: null },
+          ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null },
         }));
       },
 
       loadGameState: (game) => {
-        set({ game, occupants: buildOccupants(game.units), ui: { selectedCol: null, selectedRow: null, selectedUnitId: null } });
+        set({ game, occupants: buildOccupants(game.units), ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null } });
       },
 
       rebuildOccupants: () => {
@@ -140,10 +142,14 @@ export const useStore = create<Store>()(
         set((state) => ({ ui: { ...state.ui, selectedCol: col, selectedRow: row } }));
       },
 
-      selectUnit: (id) => {
+      selectUnits: (ids) => {
         set((state) => ({
-          ui: { ...state.ui, selectedUnitId: id, selectedCol: null, selectedRow: null },
+          ui: { ...state.ui, selectedUnitIds: ids, selectedCol: null, selectedRow: null },
         }));
+      },
+
+      setSelectionBox: (box) => {
+        set((state) => ({ ui: { ...state.ui, selectionBox: box } }));
       },
 
       spawnUnit: (col, row) => {
@@ -156,7 +162,7 @@ export const useStore = create<Store>()(
         return unit.id;
       },
 
-      moveUnitTo: (id, targetCol, targetRow) => {
+      moveUnitTo: (id, targetCol, targetRow, delayTicks = 0) => {
         const { game } = get();
         const unit = game.units[id];
         if (!unit) return;
@@ -173,7 +179,8 @@ export const useStore = create<Store>()(
                 ...unit,
                 targetCol, targetRow,
                 path,
-                state: UnitState.Moving,
+                moveTickDelay: delayTicks,
+                state: delayTicks > 0 ? UnitState.Idle : UnitState.Moving,
               },
             },
           },
@@ -188,6 +195,18 @@ export const useStore = create<Store>()(
 
           for (const id of Object.keys(units)) {
             const unit = units[id];
+
+            if (unit.moveTickDelay > 0) {
+              const newDelay = unit.moveTickDelay - 1;
+              units[id] = {
+                ...unit,
+                moveTickDelay: newDelay,
+                state: newDelay === 0 ? UnitState.Moving : UnitState.Idle,
+              };
+              changed = true;
+              continue;
+            }
+
             if (unit.state !== UnitState.Moving || unit.path.length === 0) continue;
 
             const newProgress = unit.moveProgress + 1 / UNIT_MOVE_TICKS;
@@ -198,6 +217,8 @@ export const useStore = create<Store>()(
 
               delete occupants[`${unit.col},${unit.row}`];
               occupants[`${next.col},${next.row}`] = id;
+
+              const microDelay = remaining.length > 0 && Math.random() < 0.25 ? 1 : 0;
 
               units[id] = {
                 ...unit,
@@ -210,7 +231,8 @@ export const useStore = create<Store>()(
                 // at 0 it would render at prevCol (one tile back) since tickUnits stops running.
                 moveProgress: remaining.length === 0 ? 1 : 0,
                 facing,
-                state: remaining.length === 0 ? UnitState.Idle : UnitState.Moving,
+                moveTickDelay: microDelay,
+                state: remaining.length === 0 ? UnitState.Idle : microDelay > 0 ? UnitState.Idle : UnitState.Moving,
               };
             } else {
               units[id] = { ...unit, moveProgress: newProgress };
