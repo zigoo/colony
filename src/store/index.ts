@@ -1,10 +1,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { generateMap } from '../game/mapGenerator';
-import { ResourceType } from '../game/types';
-import type { GameState, CameraState, UIState } from '../game/types';
-import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM } from '../game/constants';
+import { ResourceType, UnitType, UnitState, Direction } from '../game/types';
+import type { GameState, CameraState, UIState, Unit } from '../game/types';
+import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM, UNIT_MOVE_TICKS, MAP_COLS, MAP_ROWS } from '../game/constants';
 import { createCamera } from '../renderer/Camera';
+import { findPath } from '../game/pathfinding';
+import { getDirection } from '../game/directionUtils';
+import { worldToGrid } from '../game/isoMath';
 
 export const PLAYER_ID = 'player1';
 
@@ -12,6 +15,7 @@ interface Store {
   game: GameState;
   camera: CameraState;
   ui: UIState;
+  occupants: Record<string, string>;
 
   generateNewMap: (seed?: number) => void;
   loadGameState: (state: GameState) => void;
@@ -22,7 +26,28 @@ interface Store {
   setScreenSize: (width: number, height: number) => void;
 
   selectTile: (col: number | null, row: number | null) => void;
+  selectUnit: (id: string | null) => void;
+  spawnUnit: (col: number, row: number) => string;
+  moveUnitTo: (id: string, col: number, row: number) => void;
+  tickUnits: () => void;
+  rebuildOccupants: () => void;
 }
+
+let nextUnitIndex = 1;
+
+const makeUnit = (col: number, row: number): Unit => ({
+  id: `unit-${nextUnitIndex++}`,
+  type: UnitType.Settler,
+  ownerId: PLAYER_ID,
+  col, row, prevCol: col, prevRow: row,
+  targetCol: null, targetRow: null,
+  path: [],
+  state: UnitState.Idle,
+  moveProgress: 0,
+  carrying: null,
+  carryingAmount: 0,
+  facing: Direction.South,
+});
 
 const initialGame: GameState = {
   map: generateMap(),
@@ -34,7 +59,6 @@ const initialGame: GameState = {
       [ResourceType.Stone]: 0,
       [ResourceType.Food]:  0,
       [ResourceType.Ore]:   0,
-      [ResourceType.None]:  0,
     },
   },
   tick: 0,
@@ -42,22 +66,36 @@ const initialGame: GameState = {
   savedAt: null,
 };
 
+const buildOccupants = (units: Record<string, Unit>): Record<string, string> => {
+  const occupants: Record<string, string> = {};
+  for (const unit of Object.values(units)) {
+    occupants[`${unit.col},${unit.row}`] = unit.id;
+  }
+  return occupants;
+};
+
 export const useStore = create<Store>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       game: initialGame,
       camera: createCamera(window.innerWidth, window.innerHeight),
-      ui: { selectedCol: null, selectedRow: null },
+      ui: { selectedCol: null, selectedRow: null, selectedUnitId: null },
+      occupants: {},
 
       generateNewMap: (seed) => {
         set((state) => ({
-          game: { ...state.game, map: generateMap(seed), tick: 0, savedAt: null },
-          ui: { selectedCol: null, selectedRow: null },
+          game: { ...state.game, map: generateMap(seed), tick: 0, savedAt: null, units: {} },
+          occupants: {},
+          ui: { selectedCol: null, selectedRow: null, selectedUnitId: null },
         }));
       },
 
       loadGameState: (game) => {
-        set({ game, ui: { selectedCol: null, selectedRow: null } });
+        set({ game, occupants: buildOccupants(game.units), ui: { selectedCol: null, selectedRow: null, selectedUnitId: null } });
+      },
+
+      rebuildOccupants: () => {
+        set((state) => ({ occupants: buildOccupants(state.game.units) }));
       },
 
       saveTimestamp: () => {
@@ -99,7 +137,92 @@ export const useStore = create<Store>()(
       },
 
       selectTile: (col, row) => {
-        set({ ui: { selectedCol: col, selectedRow: row } });
+        set((state) => ({ ui: { ...state.ui, selectedCol: col, selectedRow: row } }));
+      },
+
+      selectUnit: (id) => {
+        set((state) => ({
+          ui: { ...state.ui, selectedUnitId: id, selectedCol: null, selectedRow: null },
+        }));
+      },
+
+      spawnUnit: (col, row) => {
+        const unit = makeUnit(col, row);
+        set((state) => ({
+          game: { ...state.game, units: { ...state.game.units, [unit.id]: unit } },
+          occupants: { ...state.occupants, [`${col},${row}`]: unit.id },
+        }));
+
+        return unit.id;
+      },
+
+      moveUnitTo: (id, targetCol, targetRow) => {
+        const { game } = get();
+        const unit = game.units[id];
+        if (!unit) return;
+
+        const path = findPath(game.map, unit.col, unit.row, targetCol, targetRow);
+        if (path.length === 0) return;
+
+        set((state) => ({
+          game: {
+            ...state.game,
+            units: {
+              ...state.game.units,
+              [id]: {
+                ...unit,
+                targetCol, targetRow,
+                path,
+                state: UnitState.Moving,
+              },
+            },
+          },
+        }));
+      },
+
+      tickUnits: () => {
+        set((state) => {
+          const units = { ...state.game.units };
+          const occupants = { ...state.occupants };
+          let changed = false;
+
+          for (const id of Object.keys(units)) {
+            const unit = units[id];
+            if (unit.state !== UnitState.Moving || unit.path.length === 0) continue;
+
+            const newProgress = unit.moveProgress + 1 / UNIT_MOVE_TICKS;
+
+            if (newProgress >= 1) {
+              const [next, ...remaining] = unit.path;
+              const facing = getDirection(next.col - unit.col, next.row - unit.row);
+
+              delete occupants[`${unit.col},${unit.row}`];
+              occupants[`${next.col},${next.row}`] = id;
+
+              units[id] = {
+                ...unit,
+                prevCol: unit.col,
+                prevRow: unit.row,
+                col: next.col,
+                row: next.row,
+                path: remaining,
+                // Use 1 when becoming idle: interpolation at 1 = col/row (destination),
+                // at 0 it would render at prevCol (one tile back) since tickUnits stops running.
+                moveProgress: remaining.length === 0 ? 1 : 0,
+                facing,
+                state: remaining.length === 0 ? UnitState.Idle : UnitState.Moving,
+              };
+            } else {
+              units[id] = { ...unit, moveProgress: newProgress };
+            }
+
+            changed = true;
+          }
+
+          if (!changed) return state;
+
+          return { game: { ...state.game, units, tick: state.game.tick + 1 }, occupants };
+        });
       },
     }),
     {
@@ -108,3 +231,13 @@ export const useStore = create<Store>()(
     },
   ),
 );
+
+// Spawn unit at center of viewport
+export const spawnAtCenter = (): string => {
+  const { camera, spawnUnit } = useStore.getState();
+  const { col, row } = worldToGrid(camera.x, camera.y);
+  const clampedCol = Math.max(1, Math.min(MAP_COLS - 2, col));
+  const clampedRow = Math.max(1, Math.min(MAP_ROWS - 2, row));
+
+  return spawnUnit(clampedCol, clampedRow);
+};
