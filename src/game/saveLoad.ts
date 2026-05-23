@@ -3,7 +3,7 @@ import type { GameState } from './types';
 // Retained file handle so subsequent saves skip the picker dialog
 let fileHandle: FileSystemFileHandle | null = null;
 
-export async function saveToFile(state: GameState): Promise<void> {
+export const saveToFile = async (state: GameState): Promise<void> => {
   const json = JSON.stringify(state, null, 2);
 
   if ('showSaveFilePicker' in window) {
@@ -18,12 +18,8 @@ export async function saveToFile(state: GameState): Promise<void> {
       await writable.write(json);
       await writable.close();
     } catch (e) {
-      // User cancelled picker — clear handle so next save re-opens dialog
-      if ((e as DOMException).name !== 'AbortError') {
-        fileHandle = null;
-        throw e;
-      }
       fileHandle = null;
+      if ((e as DOMException).name !== 'AbortError') throw e;
     }
   } else {
     // Fallback for browsers without File System Access API
@@ -40,11 +36,11 @@ export async function saveToFile(state: GameState): Promise<void> {
   }
 }
 
-export function resetSaveFileHandle(): void {
+export const resetSaveFileHandle = (): void => {
   fileHandle = null;
-}
+};
 
-export async function loadFromFile(): Promise<GameState> {
+export const loadFromFile = async (): Promise<GameState> => {
   if ('showOpenFilePicker' in window) {
     const [handle] = await window.showOpenFilePicker({
       types: [{ description: 'JSON save file', accept: { 'application/json': ['.json'] } }],
