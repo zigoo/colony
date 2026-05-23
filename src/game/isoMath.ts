@@ -1,4 +1,7 @@
-import { TILE_W, TILE_H } from './constants';
+import { TILE_W, TILE_H, MAP_COLS, MAP_ROWS } from './constants';
+
+export const isWithinBounds = (col: number, row: number): boolean =>
+  col >= 0 && row >= 0 && col < MAP_COLS && row < MAP_ROWS;
 
 export const gridToWorld = (col: number, row: number): { x: number; y: number } => ({
   x: (col - row) * (TILE_W / 2),
