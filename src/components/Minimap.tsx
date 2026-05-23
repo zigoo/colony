@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store';
-import { TILE_COLORS } from '../game/constants';
+import { TILE_COLORS, TILE_W, TILE_H } from '../game/constants';
 import { worldToGrid, gridToWorld } from '../game/isoMath';
 
 const SIZE = 180;
@@ -8,6 +8,10 @@ const SCALE = SIZE / 120;
 
 export const Minimap = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const isDragging = useRef(false);
+  const lastPosition = useRef({ x: 0, y: 0 });
+  const hasMoved = useRef(false);
+
   const game = useStore(state => state.game);
   const camera = useStore(state => state.camera);
   const panCamera = useStore(state => state.panCamera);
@@ -58,7 +62,45 @@ export const Minimap = () => {
     context.stroke();
   }, [game, camera]);
 
+  useEffect(() => {
+    const onMouseMove = (event: MouseEvent) => {
+      if (!isDragging.current) return;
+
+      const deltaX = event.clientX - lastPosition.current.x;
+      const deltaY = event.clientY - lastPosition.current.y;
+      lastPosition.current = { x: event.clientX, y: event.clientY };
+
+      if (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1) hasMoved.current = true;
+
+      // Minimap pixel delta → tile delta → world delta (top-down: col=x, row=y)
+      const deltaCol = deltaX / SCALE;
+      const deltaRow = deltaY / SCALE;
+      const worldDeltaX = (deltaCol - deltaRow) * (TILE_W / 2);
+      const worldDeltaY = (deltaCol + deltaRow) * (TILE_H / 2);
+
+      const currentCamera = useStore.getState().camera;
+      panCamera(-worldDeltaX * currentCamera.zoom, -worldDeltaY * currentCamera.zoom);
+    };
+
+    const onMouseUp = () => { isDragging.current = false; };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [panCamera]);
+
+  const handleMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    isDragging.current = true;
+    hasMoved.current = false;
+    lastPosition.current = { x: event.clientX, y: event.clientY };
+  };
+
   const handleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (hasMoved.current) return;
+
     const rect = canvasRef.current!.getBoundingClientRect();
     const col = (event.clientX - rect.left) / SCALE;
     const row = (event.clientY - rect.top) / SCALE;
@@ -88,6 +130,7 @@ export const Minimap = () => {
         ref={canvasRef}
         width={SIZE}
         height={SIZE}
+        onMouseDown={handleMouseDown}
         onClick={handleClick}
         style={{ cursor: 'crosshair', display: 'block' }}
       />
