@@ -3,6 +3,8 @@ import { useStore } from '../store';
 import { screenToGrid, screenToWorld, worldToScreen, gridToWorld, isWithinBounds } from '../game/isoMath';
 import { CAMERA_ZOOM_STEP_IN, CAMERA_ZOOM_STEP_OUT, MIN_DRAG_DISTANCE, ANIMATION_FRAME_SIZE, SPRITE_Y_OFFSET } from '../game/constants';
 import type { Unit, CameraState } from '../game/types';
+import { canPlaceBuilding } from '../game/buildingConfig';
+import { placementPreview } from '../renderer/placementPreview';
 
 const SPRITE_HIT = ANIMATION_FRAME_SIZE['idle'];
 
@@ -55,7 +57,7 @@ const findUnitsInScreenBox = (
 };
 
 export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): void => {
-  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, setSelectionBox, moveUnitTo, commandGather, placeBuilding, rebuildOccupants } = useStore();
+  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, setSelectionBox, moveUnitTo, commandGather, placeBuilding, rebuildOccupants } = useStore();
   const isDragging = useRef(false);
   const isShiftSelecting = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
@@ -89,6 +91,18 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
         hasMoved.current = true;
       }
 
+      // Placement preview — runs before early-returns so ghost follows cursor always
+      const { ui, camera: cam, game } = useStore.getState();
+      if (ui.selectedBuildingType) {
+        const { col, row } = screenToGrid(e.clientX, e.clientY, cam.x, cam.y, cam.zoom, cam.screenWidth, cam.screenHeight);
+        placementPreview.active = true;
+        placementPreview.col = col;
+        placementPreview.row = row;
+        placementPreview.valid = isWithinBounds(col, row) && canPlaceBuilding(ui.selectedBuildingType, col, row, game.map.tiles, game.buildings);
+      } else {
+        placementPreview.active = false;
+      }
+
       if (isShiftSelecting.current && hasMoved.current) {
         setSelectionBox({ x1: dragStart.current.x, y1: dragStart.current.y, x2: e.clientX, y2: e.clientY });
         return;
@@ -100,6 +114,8 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       panCamera(dx, dy);
       lastPos.current = { x: e.clientX, y: e.clientY };
     };
+
+    const onMouseLeave = () => { placementPreview.active = false; };
 
     const onMouseUp = (e: MouseEvent) => {
       if (isShiftSelecting.current) {
@@ -131,16 +147,21 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
 
       if (isDragging.current && !hasMoved.current) {
         const { camera, game, ui } = useStore.getState();
-        const worldPos = screenToWorld(e.clientX, e.clientY, camera.x, camera.y, camera.zoom, camera.screenWidth, camera.screenHeight);
-        const clickedUnitId = findUnitAtWorld(worldPos.x, worldPos.y, game.units);
+        const { col, row } = screenToGrid(e.clientX, e.clientY, camera.x, camera.y, camera.zoom, camera.screenWidth, camera.screenHeight);
 
-        if (clickedUnitId) {
-          const isOnlySelected = ui.selectedUnitIds.length === 1 && ui.selectedUnitIds[0] === clickedUnitId;
-          selectUnits(isOnlySelected ? [] : [clickedUnitId]);
+        // Building placement takes priority over all other click actions
+        if (ui.selectedBuildingType) {
+          if (isWithinBounds(col, row)) placeBuilding(ui.selectedBuildingType, col, row);
+          selectBuildingType(null);
+          placementPreview.active = false;
         } else {
-          const { col, row } = screenToGrid(e.clientX, e.clientY, camera.x, camera.y, camera.zoom, camera.screenWidth, camera.screenHeight);
+          const worldPos = screenToWorld(e.clientX, e.clientY, camera.x, camera.y, camera.zoom, camera.screenWidth, camera.screenHeight);
+          const clickedUnitId = findUnitAtWorld(worldPos.x, worldPos.y, game.units);
 
-          if (isWithinBounds(col, row)) {
+          if (clickedUnitId) {
+            const isOnlySelected = ui.selectedUnitIds.length === 1 && ui.selectedUnitIds[0] === clickedUnitId;
+            selectUnits(isOnlySelected ? [] : [clickedUnitId]);
+          } else if (isWithinBounds(col, row)) {
             if (ui.selectedUnitIds.length > 0) {
               const tile = game.map.tiles[`${col},${row}`];
               if (tile?.hasResource) {
@@ -174,21 +195,14 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       el.height = window.innerHeight;
     };
 
-    const onContextMenu = (e: MouseEvent) => {
-      e.preventDefault();
-      const { camera, ui } = useStore.getState();
-      if (!ui.selectedBuildingType) return;
-      const { col, row } = screenToGrid(e.clientX, e.clientY, camera.x, camera.y, camera.zoom, camera.screenWidth, camera.screenHeight);
-      if (isWithinBounds(col, row)) {
-        placeBuilding(ui.selectedBuildingType, col, row);
-      }
-    };
+    const onContextMenu = (e: MouseEvent) => { e.preventDefault(); };
 
     el.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     el.addEventListener('wheel', onWheel, { passive: false });
     el.addEventListener('contextmenu', onContextMenu);
+    el.addEventListener('mouseleave', onMouseLeave);
     window.addEventListener('resize', onResize);
 
     return () => {
@@ -197,7 +211,8 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       window.removeEventListener('mouseup', onMouseUp);
       el.removeEventListener('wheel', onWheel);
       el.removeEventListener('contextmenu', onContextMenu);
+      el.removeEventListener('mouseleave', onMouseLeave);
       window.removeEventListener('resize', onResize);
     };
-  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, setSelectionBox, moveUnitTo, commandGather, placeBuilding]);
+  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, setSelectionBox, moveUnitTo, commandGather, placeBuilding]);
 };
