@@ -22,6 +22,12 @@ export enum BuildingType {
   Settlement = 'SETTLEMENT',
 }
 
+export enum BuildingStage {
+  Unoccupied = 'UNOCCUPIED',
+  Settled    = 'SETTLED',
+  Working    = 'WORKING',
+}
+
 export enum UnitType {
   Settler = 'SETTLER',
   Worker  = 'WORKER',
@@ -74,6 +80,8 @@ export interface Building {
   ownerId: string;
   constructionProgress: number;
   level: number;
+  workerIds: string[];
+  inventory: Partial<Record<ResourceType, number>>;
 }
 
 export interface Unit {
@@ -124,4 +132,5 @@ export interface UIState {
   selectedRow: number | null;
   selectedUnitIds: string[];
   selectionBox: { x1: number; y1: number; x2: number; y2: number } | null;
+  selectedBuildingType: BuildingType | null;
 }

@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { persist, devtools } from 'zustand/middleware';
 import { generateMap } from '../game/mapGenerator';
-import { ResourceType, UnitType, UnitState, Direction } from '../game/types';
-import type { GameState, CameraState, UIState, Unit, Tile } from '../game/types';
+import { ResourceType, UnitType, UnitState, Direction, BuildingType } from '../game/types';
+import type { GameState, CameraState, UIState, Unit, Tile, Building } from '../game/types';
 import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM, UNIT_MOVE_TICKS, MAP_COLS, MAP_ROWS, GATHER_TICKS, RESOURCE_REGROW_TICKS, RESOURCE_REGROW_AMOUNT } from '../game/constants';
 import { createCamera } from '../renderer/Camera';
 import { findPath } from '../game/pathfinding';
@@ -29,10 +29,12 @@ interface Store {
 
   selectTile: (col: number | null, row: number | null) => void;
   selectUnits: (ids: string[]) => void;
+  selectBuildingType: (type: BuildingType | null) => void;
   setSelectionBox: (box: { x1: number; y1: number; x2: number; y2: number } | null) => void;
   spawnUnit: (col: number, row: number) => string;
   moveUnitTo: (id: string, col: number, row: number, delayTicks?: number) => void;
   commandGather: (ids: string[], col: number, row: number) => void;
+  placeBuilding: (type: BuildingType, col: number, row: number) => void;
   tick: () => void;
   rebuildOccupants: () => void;
 }
@@ -87,19 +89,19 @@ export const useStore = create<Store>()(
       (set, get) => ({
         game: initialGame,
         camera: createCamera(window.innerWidth, window.innerHeight),
-        ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null },
+        ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null, selectedBuildingType: null },
         occupants: {},
 
         generateNewMap: (seed) => {
           set((state) => ({
-            game: { ...state.game, map: generateMap(seed), tick: 0, savedAt: null, units: {} },
+            game: { ...state.game, map: generateMap(seed), tick: 0, savedAt: null, units: {}, buildings: {} },
             occupants: {},
-            ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null },
+            ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null, selectedBuildingType: null },
           }), false, 'generateNewMap');
         },
 
         loadGameState: (game) => {
-          set({ game, occupants: buildOccupants(game.units), ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null } }, false, 'loadGameState');
+          set({ game, occupants: buildOccupants(game.units), ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null, selectedBuildingType: null } }, false, 'loadGameState');
         },
 
         rebuildOccupants: () => {
@@ -152,6 +154,10 @@ export const useStore = create<Store>()(
           set((state) => ({
             ui: { ...state.ui, selectedUnitIds: ids, selectedCol: null, selectedRow: null },
           }), false, 'selectUnits');
+        },
+
+        selectBuildingType: (type) => {
+          set((state) => ({ ui: { ...state.ui, selectedBuildingType: type } }), false, 'selectBuildingType');
         },
 
         setSelectionBox: (box) => {
@@ -232,6 +238,22 @@ export const useStore = create<Store>()(
             }
             return { game: { ...state.game, units } };
           }, false, 'commandGather');
+        },
+
+        placeBuilding: (type, col, row) => {
+          const id = `building-${col}-${row}`;
+          const building: Building = {
+            id, type, col, row,
+            ownerId: PLAYER_ID,
+            constructionProgress: 100,
+            level: 1,
+            workerIds: [],
+            inventory: {},
+          };
+          set((state) => {
+            if (state.game.buildings[id]) return state;
+            return { game: { ...state.game, buildings: { ...state.game.buildings, [id]: building } } };
+          }, false, 'placeBuilding');
         },
 
         tick: () => {
@@ -379,7 +401,7 @@ export const useStore = create<Store>()(
         },
       }),
       {
-        name: 'settlers-v2',
+        name: 'settlers-v3',
         partialize: (state) => ({ game: state.game }),
       },
     ),
