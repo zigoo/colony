@@ -3,6 +3,7 @@ import { persist, devtools } from 'zustand/middleware';
 import { generateMap } from '../game/mapGenerator';
 import { ResourceType, UnitType, UnitState, Direction, BuildingType } from '../game/types';
 import type { GameState, CameraState, UIState, Unit, Tile, Building } from '../game/types';
+import { canPlaceBuilding } from '../game/buildingConfig';
 import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM, UNIT_MOVE_TICKS, MAP_COLS, MAP_ROWS, GATHER_TICKS, RESOURCE_REGROW_TICKS, RESOURCE_REGROW_AMOUNT } from '../game/constants';
 import { createCamera } from '../renderer/Camera';
 import { findPath } from '../game/pathfinding';
@@ -241,6 +242,9 @@ export const useStore = create<Store>()(
         },
 
         placeBuilding: (type, col, row) => {
+          const { game } = get();
+          if (!canPlaceBuilding(type, col, row, game.map.tiles, game.buildings)) return;
+
           const id = `building-${col}-${row}`;
           const building: Building = {
             id, type, col, row,
@@ -250,10 +254,7 @@ export const useStore = create<Store>()(
             workerIds: [],
             inventory: {},
           };
-          set((state) => {
-            if (state.game.buildings[id]) return state;
-            return { game: { ...state.game, buildings: { ...state.game.buildings, [id]: building } } };
-          }, false, 'placeBuilding');
+          set((state) => ({ game: { ...state.game, buildings: { ...state.game.buildings, [id]: building } } }), false, 'placeBuilding');
         },
 
         tick: () => {
