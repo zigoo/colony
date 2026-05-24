@@ -151,9 +151,12 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
 
         // Building placement takes priority over all other click actions
         if (ui.selectedBuildingType) {
-          if (isWithinBounds(col, row)) placeBuilding(ui.selectedBuildingType, col, row);
-          selectBuildingType(null);
-          placementPreview.active = false;
+          const placed = isWithinBounds(col, row) && canPlaceBuilding(ui.selectedBuildingType, col, row, game.map.tiles, game.buildings);
+          if (placed) {
+            placeBuilding(ui.selectedBuildingType, col, row);
+            selectBuildingType(null);
+            placementPreview.active = false;
+          }
         } else {
           const worldPos = screenToWorld(e.clientX, e.clientY, camera.x, camera.y, camera.zoom, camera.screenWidth, camera.screenHeight);
           const clickedUnitId = findUnitAtWorld(worldPos.x, worldPos.y, game.units);
