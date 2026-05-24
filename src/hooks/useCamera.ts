@@ -55,7 +55,7 @@ const findUnitsInScreenBox = (
 };
 
 export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): void => {
-  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, setSelectionBox, moveUnitTo, commandGather, rebuildOccupants } = useStore();
+  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, setSelectionBox, moveUnitTo, commandGather, placeBuilding, rebuildOccupants } = useStore();
   const isDragging = useRef(false);
   const isShiftSelecting = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
@@ -174,10 +174,21 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       el.height = window.innerHeight;
     };
 
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      const { camera, ui } = useStore.getState();
+      if (!ui.selectedBuildingType) return;
+      const { col, row } = screenToGrid(e.clientX, e.clientY, camera.x, camera.y, camera.zoom, camera.screenWidth, camera.screenHeight);
+      if (isWithinBounds(col, row)) {
+        placeBuilding(ui.selectedBuildingType, col, row);
+      }
+    };
+
     el.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('resize', onResize);
 
     return () => {
@@ -185,7 +196,8 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
       el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('resize', onResize);
     };
-  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, setSelectionBox, moveUnitTo, commandGather]);
+  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, setSelectionBox, moveUnitTo, commandGather, placeBuilding]);
 };
