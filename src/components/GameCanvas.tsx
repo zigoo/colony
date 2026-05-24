@@ -3,6 +3,7 @@ import { useGameLoop } from '../hooks/useGameLoop';
 import { useCamera } from '../hooks/useCamera';
 import { useStore } from '../store';
 import { preloadSprites } from '../renderer/sprites/SpriteLoader';
+import { preloadBuildingSprites } from '../renderer/sprites/BuildingLoader';
 
 export const GameCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -15,6 +16,7 @@ export const GameCanvas = () => {
     el.height = window.innerHeight;
     setScreenSize(window.innerWidth, window.innerHeight);
     preloadSprites();
+    preloadBuildingSprites();
   }, [setScreenSize]);
 
   useGameLoop(canvasRef);

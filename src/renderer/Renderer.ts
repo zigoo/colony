@@ -1,6 +1,7 @@
 import type { GameState, CameraState, UIState } from '../game/types';
 import { renderTiles } from './layers/TileLayer';
 import { renderResources } from './layers/ResourceLayer';
+import { renderBuildings } from './layers/BuildingLayer';
 import { renderSelection } from './layers/SelectionLayer';
 import { renderUnits } from './layers/UnitLayer';
 
@@ -22,6 +23,7 @@ export const render = (
 
   renderTiles(ctx, state.map, camera);
   renderResources(ctx, state.map, camera);
+  renderBuildings(ctx, state.buildings, timestamp, camera);
   renderSelection(ctx, ui.selectedCol, ui.selectedRow, camera);
   renderUnits(ctx, state.units, ui.selectedUnitIds, timestamp, camera);
 
