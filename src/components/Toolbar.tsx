@@ -76,7 +76,7 @@ export const Toolbar = ({ minimapVisible, onToggleMinimap }: ToolbarProps) => {
         marginLeft: 8,
       }}>
         {selectedUnits.length === 0 && 'no unit selected'}
-        {selectedUnits.length === 1 && `unit: ${selectedUnits[0].id} | ${selectedUnits[0].state} | (${selectedUnits[0].col},${selectedUnits[0].row}) | path: ${selectedUnits[0].path.length}`}
+        {selectedUnits.length === 1 && `unit: ${selectedUnits[0].id} | ${selectedUnits[0].gatherTier} | ${selectedUnits[0].state} | (${selectedUnits[0].col},${selectedUnits[0].row}) | path: ${selectedUnits[0].path.length}`}
         {selectedUnits.length > 1 && `${selectedUnits.length} units selected`}
       </span>
 

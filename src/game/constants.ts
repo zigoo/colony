@@ -1,4 +1,4 @@
-import { TileType, ResourceType, Direction } from './types';
+import { TileType, ResourceType, Direction, GatherTier } from './types';
 
 export const TILE_W = 64;
 export const TILE_H = 32;
@@ -49,6 +49,14 @@ export const RESOURCE_AMOUNT_MAX: Partial<Record<ResourceType, number>> = {
 };
 
 export const GATHER_TICKS = 5;
+export const DEPOSIT_TICKS = 4;
+export const STOREHOUSE_MAX_ITEMS = 40;
+
+export const GATHER_TIER_CONFIG: Record<GatherTier, { amount: number; ticks: number }> = {
+  [GatherTier.Gatherer]:  { amount: 1, ticks: 5  },
+  [GatherTier.Harvester]: { amount: 3, ticks: 12 },
+  [GatherTier.Extractor]: { amount: 7, ticks: 25 },
+};
 
 export const RESOURCE_REGROW_TICKS: Partial<Record<ResourceType, number>> = {
   [ResourceType.Wood]: 200,

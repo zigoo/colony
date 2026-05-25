@@ -5,6 +5,7 @@ import { Toolbar } from './components/Toolbar';
 import { Minimap } from './components/Minimap';
 import { SelectionBox } from './components/SelectionBox';
 import { BuildingMenu } from './components/BuildingMenu';
+import { BuildingInfoPanel } from './components/BuildingInfoPanel';
 
 export default function App() {
   const [minimapVisible, setMinimapVisible] = useState(true);
@@ -17,6 +18,7 @@ export default function App() {
       {minimapVisible && <Minimap />}
       <SelectionBox />
       <BuildingMenu />
+      <BuildingInfoPanel />
     </>
   );
 }

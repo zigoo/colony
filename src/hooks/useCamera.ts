@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store';
 import { screenToGrid, screenToWorld, worldToScreen, gridToWorld, isWithinBounds } from '../game/isoMath';
-import { CAMERA_ZOOM_STEP_IN, CAMERA_ZOOM_STEP_OUT, MIN_DRAG_DISTANCE, ANIMATION_FRAME_SIZE, SPRITE_Y_OFFSET } from '../game/constants';
-import type { Unit, CameraState } from '../game/types';
+import { CAMERA_ZOOM_STEP_IN, CAMERA_ZOOM_STEP_OUT, MIN_DRAG_DISTANCE, ANIMATION_FRAME_SIZE, SPRITE_Y_OFFSET, TILE_H } from '../game/constants';
+import type { Unit, CameraState, Building } from '../game/types';
 import { BuildingType } from '../game/types';
-import { canPlaceBuilding } from '../game/buildingConfig';
+import { canPlaceBuilding, getFootprintTiles, BUILDING_FOOTPRINT, BUILDING_WORKER_CAPACITY } from '../game/buildingConfig';
 import { findRoadPath } from '../game/pathfinding';
 import { placementPreview, roadPreview } from '../renderer/placementPreview';
-import { foodHover } from '../renderer/layers/ResourceLayer';
+import { foodHover, stoneHover } from '../renderer/layers/ResourceLayer';
 
 const SPRITE_HIT = ANIMATION_FRAME_SIZE['idle'];
 
@@ -31,6 +31,38 @@ const findUnitAtWorld = (
     ) {
       return unit.id;
     }
+  }
+
+  return undefined;
+};
+
+// World-space hit sizes match what BuildingLayer renders.
+const BUILDING_HIT_SIZE: Partial<Record<BuildingType, { w: number; h: number }>> = {
+  [BuildingType.LumberCamp]: { w: 64, h: 96 },
+  [BuildingType.Storehouse]: { w: 64, h: 213 },
+};
+
+const findBuildingAtWorld = (
+  worldX: number,
+  worldY: number,
+  buildings: Record<string, Building>,
+): Building | undefined => {
+  for (const building of Object.values(buildings)) {
+    if (building.constructionProgress < 100) continue;
+
+    const size = BUILDING_HIT_SIZE[building.type];
+
+    if (!size) continue;
+    const [fcols, frows] = BUILDING_FOOTPRINT[building.type] ?? [1, 1];
+    const { x: wx, y: wyBase } = gridToWorld(building.col, building.row);
+    const anchorY = wyBase + (fcols + frows - 1) * TILE_H / 2;
+
+    if (
+      worldX >= wx - size.w / 2 &&
+      worldX <= wx + size.w / 2 &&
+      worldY >= anchorY - size.h &&
+      worldY <= anchorY
+    ) return building;
   }
 
   return undefined;
@@ -60,7 +92,7 @@ const findUnitsInScreenBox = (
 };
 
 export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): void => {
-  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, setSelectionBox, moveUnitTo, commandGather, placeBuilding, placeRoadPath, rebuildOccupants } = useStore();
+  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, selectBuilding, setSelectionBox, moveUnitTo, commandGather, commandReport, placeBuilding, placeRoadPath, rebuildOccupants } = useStore();
   const isDragging = useRef(false);
   const isShiftSelecting = useRef(false);
   const lastRoadCursorKey = useRef<string | null>(null);
@@ -123,6 +155,9 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       foodHover.active = true;
       foodHover.worldX = mouseWorld.x;
       foodHover.worldY = mouseWorld.y;
+      stoneHover.active = true;
+      stoneHover.worldX = mouseWorld.x;
+      stoneHover.worldY = mouseWorld.y;
 
       if (ui.selectedBuildingType === BuildingType.Road) {
         placementPreview.active = false;
@@ -166,7 +201,7 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       lastPos.current = { x: e.clientX, y: e.clientY };
     };
 
-    const onMouseLeave = () => { placementPreview.active = false; roadPreview.active = false; foodHover.active = false; };
+    const onMouseLeave = () => { placementPreview.active = false; roadPreview.active = false; foodHover.active = false; stoneHover.active = false; };
 
     const onMouseUp = (e: MouseEvent) => {
       if (isShiftSelecting.current) {
@@ -218,16 +253,29 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
           } else if (isWithinBounds(col, row)) {
             if (ui.selectedUnitIds.length > 0) {
               const tile = game.map.tiles[`${col},${row}`];
+              const targetBuilding = findBuildingAtWorld(worldPos.x, worldPos.y, game.buildings);
+
               if (tile?.hasResource) {
                 commandGather(ui.selectedUnitIds, col, row);
+              } else if (targetBuilding && (BUILDING_WORKER_CAPACITY[targetBuilding.type] ?? 0) > 0) {
+                commandReport(ui.selectedUnitIds, targetBuilding.id);
               } else {
                 ui.selectedUnitIds.forEach((id, index) => moveUnitTo(id, col, row, index * 2));
               }
+
               if (!e.metaKey) selectUnits([]);
             } else {
-              selectTile(col, row);
+              const clickedBuilding = findBuildingAtWorld(worldPos.x, worldPos.y, game.buildings);
+
+              if (clickedBuilding) {
+                selectBuilding(clickedBuilding.id);
+              } else {
+                selectBuilding(null);
+                selectTile(col, row);
+              }
             }
           } else {
+            selectBuilding(null);
             selectTile(null, null);
             selectUnits([]);
           }
@@ -268,5 +316,5 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       el.removeEventListener('mouseleave', onMouseLeave);
       window.removeEventListener('resize', onResize);
     };
-  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, setSelectionBox, moveUnitTo, commandGather, placeBuilding, placeRoadPath]);
+  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, selectBuilding, setSelectionBox, moveUnitTo, commandGather, commandReport, placeBuilding, placeRoadPath]);
 };

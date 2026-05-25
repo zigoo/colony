@@ -1,11 +1,22 @@
 import { useStore, PLAYER_ID } from '../store';
-import { ResourceType } from '../game/types';
+import { ResourceType, UnitState } from '../game/types';
 
 export const HUD = () => {
-  const resources = useStore((state) => state.game.resources[PLAYER_ID]);
+  const resources  = useStore((state) => state.game.resources[PLAYER_ID]);
   const selectedCol = useStore((state) => state.ui.selectedCol);
   const selectedRow = useStore((state) => state.ui.selectedRow);
-  const map = useStore((state) => state.game.map);
+  const map        = useStore((state) => state.game.map);
+  const units      = useStore((state) => state.game.units);
+  const buildings  = useStore((state) => state.game.buildings);
+
+  const mapUnits      = Object.values(units);
+  const absorbedCount = Object.values(buildings).reduce((s, b) => s + b.workerIds.length, 0);
+  const totalPeople   = mapUnits.length + absorbedCount;
+  const workingCount  = absorbedCount + mapUnits.filter(u =>
+    u.state === UnitState.Collecting ||
+    u.state === UnitState.Depositing ||
+    (u.state === UnitState.Moving && u.gatherTarget !== null)
+  ).length;
 
   const selectedTile =
     selectedCol !== null && selectedRow !== null
@@ -43,7 +54,18 @@ export const HUD = () => {
         </div>
       )}
 
-      <div style={{ opacity: 0.6 }}>Drag to pan · Scroll to zoom</div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <span>People: {totalPeople}</span>
+        <span style={{ color: 'rgba(255,255,255,0.4)' }}>·</span>
+        <span style={{ color: workingCount > 0 ? '#7dda7d' : 'rgba(255,255,255,0.45)' }}>
+          {workingCount} working
+        </span>
+        {totalPeople > workingCount && (
+          <span style={{ color: 'rgba(255,200,80,0.8)' }}>
+            · {totalPeople - workingCount} idle
+          </span>
+        )}
+      </div>
     </div>
   );
 };

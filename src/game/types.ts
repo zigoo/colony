@@ -16,11 +16,12 @@ export enum ResourceType {
 }
 
 export enum BuildingType {
-  LumberCamp = 'LUMBERCAMP',
-  Quarry     = 'QUARRY',
-  Farm       = 'FARM',
-  Settlement = 'SETTLEMENT',
-  Road       = 'ROAD',
+  LumberCamp  = 'LUMBERCAMP',
+  Quarry      = 'QUARRY',
+  Farm        = 'FARM',
+  Settlement  = 'SETTLEMENT',
+  Road        = 'ROAD',
+  Storehouse  = 'STOREHOUSE',
 }
 
 export enum BuildingStage {
@@ -35,11 +36,18 @@ export enum UnitType {
   Scout   = 'SCOUT',
 }
 
+export enum GatherTier {
+  Gatherer  = 'GATHERER',
+  Harvester = 'HARVESTER',
+  Extractor = 'EXTRACTOR',
+}
+
 export enum UnitState {
   Idle       = 'IDLE',
   Moving     = 'MOVING',
   Collecting = 'COLLECTING',
   Building   = 'BUILDING',
+  Depositing = 'DEPOSITING',
 }
 
 export enum Direction {
@@ -89,6 +97,7 @@ export interface Building {
 export interface Unit {
   id: string;
   type: UnitType;
+  gatherTier: GatherTier;
   ownerId: string;
   col: number;
   row: number;
@@ -105,6 +114,9 @@ export interface Unit {
   facing: Direction;
   gatherTarget: { col: number; row: number } | null;
   collectingTicksRemaining: number;
+  depositTarget: { col: number; row: number } | null;
+  depositingTicksRemaining: number;
+  reportingTo: string | null;
 }
 
 export type ResourceInventory = Record<Exclude<ResourceType, ResourceType.None>, number>;
@@ -135,4 +147,5 @@ export interface UIState {
   selectedUnitIds: string[];
   selectionBox: { x1: number; y1: number; x2: number; y2: number } | null;
   selectedBuildingType: BuildingType | null;
+  selectedBuildingId: string | null;
 }

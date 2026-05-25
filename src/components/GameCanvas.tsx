@@ -7,6 +7,7 @@ import { preloadBuildingSprites } from '../renderer/sprites/BuildingLoader';
 import { preloadGrassTextures } from '../renderer/grassLoader';
 import { initRoadGen } from '../renderer/roadGen';
 import { preloadTreeSprites } from '../renderer/treeLoader';
+import { preloadStoneSprites } from '../renderer/stoneLoader';
 
 export const GameCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -22,6 +23,7 @@ export const GameCanvas = () => {
     preloadSprites();
     preloadBuildingSprites();
     preloadTreeSprites();
+    preloadStoneSprites();
     initRoadGen();
   }, [setScreenSize]);
 

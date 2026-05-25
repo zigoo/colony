@@ -21,6 +21,13 @@ const MENU: Category[] = [
           { type: BuildingType.LumberCamp, icon: '🪵' },
         ],
       },
+      {
+        id: 'storage',
+        label: 'Storage',
+        buildings: [
+          { type: BuildingType.Storehouse, icon: '📦' },
+        ],
+      },
     ],
   },
   {

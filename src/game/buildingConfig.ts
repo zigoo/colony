@@ -4,6 +4,12 @@ import type { Tile, Building } from './types';
 // Tile footprint [cols, rows] — shared by rendering (anchor calc) and placement validation.
 export const BUILDING_FOOTPRINT: Partial<Record<BuildingType, [number, number]>> = {
   [BuildingType.LumberCamp]: [2, 2],
+  [BuildingType.Storehouse]: [2, 2],
+};
+
+// How many worker units a building can absorb.
+export const BUILDING_WORKER_CAPACITY: Partial<Record<BuildingType, number>> = {
+  [BuildingType.LumberCamp]: 1,
 };
 
 export const getFootprintTiles = (

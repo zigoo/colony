@@ -16,4 +16,5 @@ export const preloadBuildingSprites = (): void => {
   load('sawmill_working',    '/assets/sprites/buildings/sawmill/sawmill_working_spritesheet.png');
   load('sawmill_settled',    '/assets/sprites/buildings/sawmill/sawmill_empty_settled.png');
   load('sawmill_unoccupied', '/assets/sprites/buildings/sawmill/sawmill_empty_unoccupied.png');
+  load('storehouse_sheet',   '/assets/sprites/buildings/storehouse/storehouse.png');
 };
