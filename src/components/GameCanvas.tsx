@@ -4,6 +4,9 @@ import { useCamera } from '../hooks/useCamera';
 import { useStore } from '../store';
 import { preloadSprites } from '../renderer/sprites/SpriteLoader';
 import { preloadBuildingSprites } from '../renderer/sprites/BuildingLoader';
+import { preloadGrassTextures } from '../renderer/grassLoader';
+import { initRoadGen } from '../renderer/roadGen';
+import { preloadTreeSprites } from '../renderer/treeLoader';
 
 export const GameCanvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -15,8 +18,11 @@ export const GameCanvas = () => {
     el.width = window.innerWidth;
     el.height = window.innerHeight;
     setScreenSize(window.innerWidth, window.innerHeight);
+    preloadGrassTextures();
     preloadSprites();
     preloadBuildingSprites();
+    preloadTreeSprites();
+    initRoadGen();
   }, [setScreenSize]);
 
   useGameLoop(canvasRef);

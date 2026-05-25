@@ -1,4 +1,5 @@
 import type { MapState } from './types';
+import { TileType } from './types';
 import { TILE_MOVE_COSTS } from './constants';
 import { isWithinBounds } from './isoMath';
 
@@ -19,7 +20,6 @@ const octile = (col1: number, row1: number, col2: number, row2: number): number 
   return Math.max(dc, dr) + (Math.SQRT2 - 1) * Math.min(dc, dr);
 };
 
-// Min-heap keyed by node.f for O(log n) open-list operations
 class MinHeap {
   private heap: Node[] = [];
 
@@ -71,18 +71,36 @@ const NEIGHBORS = [
   { dcol: -1, drow:  1 }, { dcol:  1, drow:  1 },
 ];
 
-const tileCost = (map: MapState, col: number, row: number): number => {
-  const tile = map.tiles[key(col, row)];
-  return tile ? TILE_MOVE_COSTS[tile.type] : Infinity;
+const CARDINAL_NEIGHBORS = [
+  { dcol:  0, drow: -1 }, { dcol:  0, drow:  1 },
+  { dcol: -1, drow:  0 }, { dcol:  1, drow:  0 },
+];
+
+const ROAD_MOVE_COSTS: Record<TileType, number> = {
+  ...TILE_MOVE_COSTS,
+  [TileType.Stone]: Infinity,
 };
 
-export const findPath = (
+type CostFn = (map: MapState, col: number, row: number) => number;
+
+const makeTileCost = (costs: Record<TileType, number>): CostFn =>
+  (map, col, row) => {
+    const tile = map.tiles[key(col, row)];
+    return tile ? costs[tile.type] : Infinity;
+  };
+
+const tileCost     = makeTileCost(TILE_MOVE_COSTS);
+const roadTileCost = makeTileCost(ROAD_MOVE_COSTS);
+
+const astar = (
   map: MapState,
   startCol: number, startRow: number,
   endCol: number, endRow: number,
+  costFn: CostFn,
+  neighbors = NEIGHBORS,
 ): Array<{ col: number; row: number }> => {
   if (startCol === endCol && startRow === endRow) return [];
-  if (tileCost(map, endCol, endRow) === Infinity) return [];
+  if (costFn(map, endCol, endRow) === Infinity) return [];
 
   const open = new MinHeap();
   const gScore = new Map<string, number>();
@@ -112,7 +130,7 @@ export const findPath = (
     if (closed.has(currentKey)) continue;
     closed.add(currentKey);
 
-    for (const { dcol, drow } of NEIGHBORS) {
+    for (const { dcol, drow } of neighbors) {
       const nc = current.col + dcol;
       const nr = current.row + drow;
 
@@ -121,13 +139,12 @@ export const findPath = (
 
       const diagonal = dcol !== 0 && drow !== 0;
 
-      // Prevent corner cutting: both cardinal neighbours of a diagonal step must be passable
       if (diagonal) {
-        if (tileCost(map, current.col + dcol, current.row) === Infinity) continue;
-        if (tileCost(map, current.col, current.row + drow) === Infinity) continue;
+        if (costFn(map, current.col + dcol, current.row) === Infinity) continue;
+        if (costFn(map, current.col, current.row + drow) === Infinity) continue;
       }
 
-      const cost = tileCost(map, nc, nr);
+      const cost = costFn(map, nc, nr);
       if (cost === Infinity) continue;
 
       const stepCost = diagonal ? cost * Math.SQRT2 : cost;
@@ -146,3 +163,15 @@ export const findPath = (
 
   return [];
 };
+
+export const findPath = (
+  map: MapState,
+  startCol: number, startRow: number,
+  endCol: number, endRow: number,
+): Array<{ col: number; row: number }> => astar(map, startCol, startRow, endCol, endRow, tileCost);
+
+export const findRoadPath = (
+  map: MapState,
+  startCol: number, startRow: number,
+  endCol: number, endRow: number,
+): Array<{ col: number; row: number }> => astar(map, startCol, startRow, endCol, endRow, roadTileCost, CARDINAL_NEIGHBORS);

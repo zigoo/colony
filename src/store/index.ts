@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, devtools } from 'zustand/middleware';
 import { generateMap } from '../game/mapGenerator';
-import { ResourceType, UnitType, UnitState, Direction, BuildingType } from '../game/types';
+import { ResourceType, UnitType, UnitState, Direction, BuildingType, TileType } from '../game/types';
 import type { GameState, CameraState, UIState, Unit, Tile, Building } from '../game/types';
 import { canPlaceBuilding } from '../game/buildingConfig';
 import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM, UNIT_MOVE_TICKS, MAP_COLS, MAP_ROWS, GATHER_TICKS, RESOURCE_REGROW_TICKS, RESOURCE_REGROW_AMOUNT } from '../game/constants';
@@ -36,6 +36,7 @@ interface Store {
   moveUnitTo: (id: string, col: number, row: number, delayTicks?: number) => void;
   commandGather: (ids: string[], col: number, row: number) => void;
   placeBuilding: (type: BuildingType, col: number, row: number) => void;
+  placeRoadPath: (positions: Array<{ col: number; row: number }>) => void;
   tick: () => void;
   rebuildOccupants: () => void;
 }
@@ -239,6 +240,27 @@ export const useStore = create<Store>()(
             }
             return { game: { ...state.game, units } };
           }, false, 'commandGather');
+        },
+
+        placeRoadPath: (positions) => {
+          set((state) => {
+            const tiles = { ...state.game.map.tiles };
+            let changed = false;
+            for (const { col, row } of positions) {
+              const k = `${col},${row}`;
+              const tile = tiles[k];
+              if (
+                !tile || tile.hasRoad ||
+                tile.type === TileType.Water ||
+                tile.type === TileType.Stone ||
+                tile.type === TileType.Mountain
+              ) continue;
+              tiles[k] = { ...tile, hasRoad: true };
+              changed = true;
+            }
+            if (!changed) return state;
+            return { game: { ...state.game, map: { ...state.game.map, tiles } } };
+          }, false, 'placeRoadPath');
         },
 
         placeBuilding: (type, col, row) => {

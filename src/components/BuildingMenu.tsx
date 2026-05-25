@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useStore } from '../store';
 import { BuildingType } from '../game/types';
+import { roadPreview } from '../renderer/placementPreview';
 
 type BuildingDef  = { type: BuildingType; icon: string };
 type Subcategory  = { id: string; label: string; buildings: BuildingDef[] };
@@ -18,6 +19,20 @@ const MENU: Category[] = [
         label: 'Wood',
         buildings: [
           { type: BuildingType.LumberCamp, icon: '🪵' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'infrastructure',
+    label: 'Infra',
+    icon: '🛤️',
+    subcategories: [
+      {
+        id: 'paths',
+        label: 'Paths',
+        buildings: [
+          { type: BuildingType.Road, icon: '🛤️' },
         ],
       },
     ],
@@ -98,6 +113,9 @@ export const BuildingMenu = () => {
       selectBuildingType(null);
       setActiveCatId(null);
       setActiveSubId(null);
+      roadPreview.active = false;
+      roadPreview.hasAnchor = false;
+      roadPreview.path = [];
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

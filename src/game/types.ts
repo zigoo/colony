@@ -20,6 +20,7 @@ export enum BuildingType {
   Quarry     = 'QUARRY',
   Farm       = 'FARM',
   Settlement = 'SETTLEMENT',
+  Road       = 'ROAD',
 }
 
 export enum BuildingStage {
@@ -61,6 +62,7 @@ export interface Tile {
   resourceType: ResourceType;
   resourceAmount: number;
   moveCost: number;
+  hasRoad?: boolean;
   lastHarvestedAt?: number;
 }
 
