@@ -3,8 +3,11 @@ import { useStore } from '../store';
 import { screenToGrid, screenToWorld, worldToScreen, gridToWorld, isWithinBounds } from '../game/isoMath';
 import { CAMERA_ZOOM_STEP_IN, CAMERA_ZOOM_STEP_OUT, MIN_DRAG_DISTANCE, ANIMATION_FRAME_SIZE, SPRITE_Y_OFFSET } from '../game/constants';
 import type { Unit, CameraState } from '../game/types';
+import { BuildingType } from '../game/types';
 import { canPlaceBuilding } from '../game/buildingConfig';
-import { placementPreview } from '../renderer/placementPreview';
+import { findRoadPath } from '../game/pathfinding';
+import { placementPreview, roadPreview } from '../renderer/placementPreview';
+import { foodHover } from '../renderer/layers/ResourceLayer';
 
 const SPRITE_HIT = ANIMATION_FRAME_SIZE['idle'];
 
@@ -57,9 +60,10 @@ const findUnitsInScreenBox = (
 };
 
 export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): void => {
-  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, setSelectionBox, moveUnitTo, commandGather, placeBuilding, rebuildOccupants } = useStore();
+  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, setSelectionBox, moveUnitTo, commandGather, placeBuilding, placeRoadPath, rebuildOccupants } = useStore();
   const isDragging = useRef(false);
   const isShiftSelecting = useRef(false);
+  const lastRoadCursorKey = useRef<string | null>(null);
   const dragStart = useRef({ x: 0, y: 0 });
   const lastPos = useRef({ x: 0, y: 0 });
   const hasMoved = useRef(false);
@@ -77,6 +81,28 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       dragStart.current = { x: e.clientX, y: e.clientY };
       lastPos.current = { x: e.clientX, y: e.clientY };
 
+      const { ui, camera: cam } = useStore.getState();
+
+      if (ui.selectedBuildingType === BuildingType.Road) {
+        const { col, row } = screenToGrid(e.clientX, e.clientY, cam.x, cam.y, cam.zoom, cam.screenWidth, cam.screenHeight);
+
+        if (!roadPreview.hasAnchor) {
+          roadPreview.hasAnchor = true;
+          roadPreview.anchorCol = col;
+          roadPreview.anchorRow = row;
+          roadPreview.path = [];
+          roadPreview.active = true;
+        } else {
+          placeRoadPath(roadPreview.path);
+          roadPreview.anchorCol = col;
+          roadPreview.anchorRow = row;
+          roadPreview.path = [];
+          lastRoadCursorKey.current = null;
+        }
+
+        return;
+      }
+
       if (e.shiftKey) {
         isShiftSelecting.current = true;
       } else {
@@ -91,10 +117,35 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
         hasMoved.current = true;
       }
 
-      // Placement preview — runs before early-returns so ghost follows cursor always
       const { ui, camera: cam, game } = useStore.getState();
+      const { col, row } = screenToGrid(e.clientX, e.clientY, cam.x, cam.y, cam.zoom, cam.screenWidth, cam.screenHeight);
+      const mouseWorld = screenToWorld(e.clientX, e.clientY, cam.x, cam.y, cam.zoom, cam.screenWidth, cam.screenHeight);
+      foodHover.active = true;
+      foodHover.worldX = mouseWorld.x;
+      foodHover.worldY = mouseWorld.y;
+
+      if (ui.selectedBuildingType === BuildingType.Road) {
+        placementPreview.active = false;
+        roadPreview.active = true;
+
+        const cursorKey = `${col},${row}`;
+        if (cursorKey !== lastRoadCursorKey.current) {
+          lastRoadCursorKey.current = cursorKey;
+
+          if (roadPreview.hasAnchor && (col !== roadPreview.anchorCol || row !== roadPreview.anchorRow)) {
+            roadPreview.path = findRoadPath(game.map, roadPreview.anchorCol, roadPreview.anchorRow, col, row);
+          } else if (!roadPreview.hasAnchor) {
+            roadPreview.path = [{ col, row }];
+          }
+        }
+
+        return;
+      }
+
+      roadPreview.active = false;
+      roadPreview.hasAnchor = false;
+
       if (ui.selectedBuildingType) {
-        const { col, row } = screenToGrid(e.clientX, e.clientY, cam.x, cam.y, cam.zoom, cam.screenWidth, cam.screenHeight);
         placementPreview.active = true;
         placementPreview.col = col;
         placementPreview.row = row;
@@ -115,7 +166,7 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       lastPos.current = { x: e.clientX, y: e.clientY };
     };
 
-    const onMouseLeave = () => { placementPreview.active = false; };
+    const onMouseLeave = () => { placementPreview.active = false; roadPreview.active = false; foodHover.active = false; };
 
     const onMouseUp = (e: MouseEvent) => {
       if (isShiftSelecting.current) {
@@ -150,7 +201,7 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
         const { col, row } = screenToGrid(e.clientX, e.clientY, camera.x, camera.y, camera.zoom, camera.screenWidth, camera.screenHeight);
 
         // Building placement takes priority over all other click actions
-        if (ui.selectedBuildingType) {
+        if (ui.selectedBuildingType && ui.selectedBuildingType !== BuildingType.Road) {
           const placed = isWithinBounds(col, row) && canPlaceBuilding(ui.selectedBuildingType, col, row, game.map.tiles, game.buildings);
           if (placed) {
             placeBuilding(ui.selectedBuildingType, col, row);
@@ -217,5 +268,5 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       el.removeEventListener('mouseleave', onMouseLeave);
       window.removeEventListener('resize', onResize);
     };
-  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, setSelectionBox, moveUnitTo, commandGather, placeBuilding]);
+  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, setSelectionBox, moveUnitTo, commandGather, placeBuilding, placeRoadPath]);
 };
