@@ -155,12 +155,16 @@ export const renderUnits = (
 
   // Draw destination markers first (below sprites)
   for (const unit of sorted) {
+    if (unit.assignedBuilding && unit.state === UnitStateEnum.Idle && !unit.buildingTask) continue;
+
     if (unit.state === UnitStateEnum.Moving && unit.targetCol !== null && unit.targetRow !== null) {
       drawDestinationDiamond(ctx, unit.targetCol, unit.targetRow, camera.zoom, timestamp);
     }
   }
 
   for (const unit of sorted) {
+    if (unit.assignedBuilding && unit.state === UnitStateEnum.Idle && !unit.buildingTask) continue;
+
     const { col, row } = interpolatedPosition(unit);
     const { x: wx, y: wy } = gridToWorld(col, row);
 

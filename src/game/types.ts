@@ -8,11 +8,13 @@ export enum TileType {
 }
 
 export enum ResourceType {
-  Wood  = 'WOOD',
-  Stone = 'STONE',
-  Food  = 'FOOD',
-  Ore   = 'ORE',
-  None  = 'NONE',
+  Wood   = 'WOOD',
+  Stone  = 'STONE',
+  Food   = 'FOOD',
+  Ore    = 'ORE',
+  Lumber = 'LUMBER',
+  Planks = 'PLANKS',
+  None   = 'NONE',
 }
 
 export enum BuildingType {
@@ -22,6 +24,7 @@ export enum BuildingType {
   Settlement  = 'SETTLEMENT',
   Road        = 'ROAD',
   Storehouse  = 'STOREHOUSE',
+  WoodCutter  = 'WOODCUTTER',
 }
 
 export enum BuildingStage {
@@ -92,6 +95,8 @@ export interface Building {
   level: number;
   workerIds: string[];
   inventory: Partial<Record<ResourceType, number>>;
+  productionProgress: number;
+  noAutoAssign?: boolean;
 }
 
 export interface Unit {
@@ -117,6 +122,8 @@ export interface Unit {
   depositTarget: { col: number; row: number } | null;
   depositingTicksRemaining: number;
   reportingTo: string | null;
+  assignedBuilding: string | null;
+  buildingTask: 'fetch' | 'deliver' | 'fetch-output' | 'carry' | null;
 }
 
 export type ResourceInventory = Record<Exclude<ResourceType, ResourceType.None>, number>;
@@ -148,4 +155,5 @@ export interface UIState {
   selectionBox: { x1: number; y1: number; x2: number; y2: number } | null;
   selectedBuildingType: BuildingType | null;
   selectedBuildingId: string | null;
+  debug: boolean;
 }

@@ -3,7 +3,7 @@ import { persist, devtools } from 'zustand/middleware';
 import { generateMap } from '../game/mapGenerator';
 import { ResourceType, UnitType, UnitState, Direction, BuildingType, TileType, GatherTier } from '../game/types';
 import type { GameState, CameraState, UIState, Unit, Tile, Building } from '../game/types';
-import { canPlaceBuilding, BUILDING_WORKER_CAPACITY } from '../game/buildingConfig';
+import { canPlaceBuilding, getWorkerCapacity, BUILDING_PRODUCTION } from '../game/buildingConfig';
 import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM, UNIT_MOVE_TICKS, MAP_COLS, MAP_ROWS, GATHER_TIER_CONFIG, DEPOSIT_TICKS, STOREHOUSE_MAX_ITEMS, RESOURCE_REGROW_TICKS, RESOURCE_REGROW_AMOUNT } from '../game/constants';
 import { createCamera } from '../renderer/Camera';
 import { findPath } from '../game/pathfinding';
@@ -28,6 +28,7 @@ interface Store {
   zoomCamera: (factor: number, pivotX: number, pivotY: number) => void;
   setScreenSize: (width: number, height: number) => void;
 
+  toggleDebug: () => void;
   selectTile: (col: number | null, row: number | null) => void;
   selectUnits: (ids: string[]) => void;
   selectBuildingType: (type: BuildingType | null) => void;
@@ -37,6 +38,8 @@ interface Store {
   moveUnitTo: (id: string, col: number, row: number, delayTicks?: number) => void;
   commandGather: (ids: string[], col: number, row: number) => void;
   commandReport: (ids: string[], buildingId: string) => void;
+  assignWorker: (buildingId: string) => void;
+  dismissWorker: (buildingId: string) => void;
   placeBuilding: (type: BuildingType, col: number, row: number) => void;
   placeRoadPath: (positions: Array<{ col: number; row: number }>) => void;
   tick: () => void;
@@ -71,6 +74,51 @@ const findNearestStorehouse = (
   return best ?? fallback;
 };
 
+const findStorehouseWithResource = (
+  buildings: Record<string, Building>,
+  resource: ResourceType,
+  col: number,
+  row: number,
+): Building | null => {
+  let best: Building | null = null;
+  let bestDist = Infinity;
+
+  for (const b of Object.values(buildings)) {
+    if (b.type !== BuildingType.Storehouse) continue;
+    if ((b.inventory[resource] ?? 0) <= 0) continue;
+    const dist = Math.abs(b.col - col) + Math.abs(b.row - row);
+
+    if (dist < bestDist) { bestDist = dist; best = b; }
+  }
+
+  return best;
+};
+
+const ADJACENT_DIRS = [
+  { dc: -1, dr:  0 }, { dc:  1, dr:  0 },
+  { dc:  0, dr: -1 }, { dc:  0, dr:  1 },
+  { dc: -1, dr: -1 }, { dc:  1, dr: -1 },
+  { dc: -1, dr:  1 }, { dc:  1, dr:  1 },
+];
+
+const findAdjacentFreeTile = (
+  col: number,
+  row: number,
+  mapTiles: Record<string, Tile>,
+  occupants: Record<string, string>,
+): { col: number; row: number } | null => {
+  for (const { dc, dr } of ADJACENT_DIRS) {
+    const nc = col + dc, nr = row + dr;
+    const tile = mapTiles[`${nc},${nr}`];
+
+    if (!tile || tile.type === TileType.Water || tile.type === TileType.Mountain) continue;
+
+    if (!occupants[`${nc},${nr}`]) return { col: nc, row: nr };
+  }
+
+  return null;
+};
+
 let nextUnitIndex = 1;
 
 const makeUnit = (col: number, row: number): Unit => ({
@@ -92,6 +140,8 @@ const makeUnit = (col: number, row: number): Unit => ({
   depositTarget: null,
   depositingTicksRemaining: 0,
   reportingTo: null,
+  assignedBuilding: null,
+  buildingTask: null,
 });
 
 const initialGame: GameState = {
@@ -100,10 +150,12 @@ const initialGame: GameState = {
   units: {},
   resources: {
     [PLAYER_ID]: {
-      [ResourceType.Wood]:  0,
-      [ResourceType.Stone]: 0,
-      [ResourceType.Food]:  0,
-      [ResourceType.Ore]:   0,
+      [ResourceType.Wood]:   0,
+      [ResourceType.Stone]:  0,
+      [ResourceType.Food]:   0,
+      [ResourceType.Ore]:    0,
+      [ResourceType.Lumber]: 0,
+      [ResourceType.Planks]: 0,
     },
   },
   tick: 0,
@@ -125,14 +177,14 @@ export const useStore = create<Store>()(
       (set, get) => ({
         game: initialGame,
         camera: createCamera(window.innerWidth, window.innerHeight),
-        ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null, selectedBuildingType: null, selectedBuildingId: null },
+        ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null, selectedBuildingType: null, selectedBuildingId: null, debug: false },
         occupants: {},
 
         generateNewMap: (seed) => {
           set((state) => ({
             game: { ...state.game, map: generateMap(seed), tick: 0, savedAt: null, units: {}, buildings: {} },
             occupants: {},
-            ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null, selectedBuildingType: null, selectedBuildingId: null },
+            ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null, selectedBuildingType: null, selectedBuildingId: null, debug: false },
           }), false, 'generateNewMap');
         },
 
@@ -145,10 +197,16 @@ export const useStore = create<Store>()(
               depositTarget:            unit.depositTarget ?? null,
               depositingTicksRemaining: unit.depositingTicksRemaining ?? 0,
               reportingTo:              unit.reportingTo ?? null,
+            assignedBuilding:         (unit as Unit).assignedBuilding ?? null,
+            buildingTask:             (unit as Unit).buildingTask ?? null,
             };
           }
-          const migratedGame = { ...game, units: migratedUnits };
-          set({ game: migratedGame, occupants: buildOccupants(migratedUnits), ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null, selectedBuildingType: null, selectedBuildingId: null } }, false, 'loadGameState');
+          const migratedBuildings: Record<string, Building> = {};
+          for (const [bid, b] of Object.entries(game.buildings)) {
+            migratedBuildings[bid] = { ...b, productionProgress: b.productionProgress ?? 0 };
+          }
+          const migratedGame = { ...game, units: migratedUnits, buildings: migratedBuildings };
+          set({ game: migratedGame, occupants: buildOccupants(migratedUnits), ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null, selectedBuildingType: null, selectedBuildingId: null, debug: false } }, false, 'loadGameState');
         },
 
         rebuildOccupants: () => {
@@ -191,6 +249,10 @@ export const useStore = create<Store>()(
           set((state) => ({
             camera: { ...state.camera, screenWidth: width, screenHeight: height },
           }), false, 'setScreenSize');
+        },
+
+        toggleDebug: () => {
+          set((state) => ({ ui: { ...state.ui, debug: !state.ui.debug } }), false, 'toggleDebug');
         },
 
         selectTile: (col, row) => {
@@ -294,6 +356,13 @@ export const useStore = create<Store>()(
             // Task 3: unit already carrying resources → let it finish the deposit run.
             if (unit.depositTarget !== null || unit.state === UnitState.Depositing) continue;
 
+            // Wood gathering is restricted to WoodCutter-assigned units.
+            if (targetResource === ResourceType.Wood) {
+              const assignedBuilding = unit.assignedBuilding ? game.buildings[unit.assignedBuilding] : null;
+
+              if (!assignedBuilding || assignedBuilding.type !== BuildingType.WoodCutter) continue;
+            }
+
             // Pick the tile that minimises (distance-to-unit + crowding penalty).
             let bestTile = nearby[0];
             let bestScore = Infinity;
@@ -358,12 +427,20 @@ export const useStore = create<Store>()(
           const { game } = get();
           const building = game.buildings[buildingId];
 
-          if (!building || (BUILDING_WORKER_CAPACITY[building.type] ?? 0) === 0) return;
+          if (!building || getWorkerCapacity(building.type, building.level) === 0) return;
+
+          const capacity = getWorkerCapacity(building.type, building.level);
+          const enRoute = Object.values(game.units).filter(u => u.reportingTo === buildingId).length;
+          const slots = capacity - building.workerIds.length - enRoute;
+
+          if (slots <= 0) return;
+
+          const toAssign = ids.slice(0, slots);
 
           set((state) => {
             const units = { ...state.game.units };
 
-            for (const id of ids) {
+            for (const id of toAssign) {
               const unit = units[id];
 
               if (!unit) continue;
@@ -381,11 +458,91 @@ export const useStore = create<Store>()(
                 targetRow: building.row,
                 gatherTarget: null,
                 collectingTicksRemaining: 0,
+                buildingTask: null,
+                carrying: null,
+                carryingAmount: 0,
               };
             }
 
-            return { game: { ...state.game, units } };
+            const buildings = building.noAutoAssign
+              ? { ...state.game.buildings, [buildingId]: { ...state.game.buildings[buildingId], noAutoAssign: false } }
+              : state.game.buildings;
+
+            return { game: { ...state.game, units, buildings } };
           }, false, 'commandReport');
+        },
+
+        assignWorker: (buildingId) => {
+          const { game, commandReport } = get();
+          const building = game.buildings[buildingId];
+
+          if (!building) return;
+
+          const capacity  = getWorkerCapacity(building.type, building.level);
+          const enRoute   = Object.values(game.units).filter(u => u.reportingTo === buildingId).length;
+
+          if (building.workerIds.length + enRoute >= capacity) return;
+
+          const free = Object.values(game.units)
+            .filter(u => u.state === UnitState.Idle && !u.reportingTo && !u.assignedBuilding)
+            .sort((a, b) =>
+              (Math.abs(a.col - building.col) + Math.abs(a.row - building.row)) -
+              (Math.abs(b.col - building.col) + Math.abs(b.row - building.row)),
+            );
+
+          if (free.length === 0) return;
+
+          commandReport([free[0].id], buildingId);
+        },
+
+        dismissWorker: (buildingId) => {
+          set((state) => {
+            const building = state.game.buildings[buildingId];
+
+            if (!building || building.workerIds.length === 0) return state;
+
+            const workerId  = building.workerIds[0];
+            const workerIds = building.workerIds.slice(1);
+            const existing  = state.game.units[workerId];
+
+            let newUnits    = state.game.units;
+            let newOccupants = state.occupants;
+
+            if (existing) {
+              newUnits = {
+                ...state.game.units,
+                [workerId]: {
+                  ...existing,
+                  assignedBuilding: null,
+                  buildingTask: null,
+                  carrying: null,
+                  carryingAmount: 0,
+                  gatherTarget: null,
+                  reportingTo: null,
+                  path: [],
+                  state: UnitState.Idle,
+                },
+              };
+              newOccupants = { ...state.occupants, [`${existing.col},${existing.row}`]: workerId };
+            } else {
+              const spawn = findAdjacentFreeTile(
+                building.col, building.row,
+                state.game.map.tiles, state.occupants,
+              ) ?? { col: building.col, row: building.row };
+              const unit = makeUnit(spawn.col, spawn.row);
+              newUnits = { ...state.game.units, [unit.id]: unit };
+              newOccupants = { ...state.occupants, [`${spawn.col},${spawn.row}`]: unit.id };
+            }
+
+            return {
+              game: {
+                ...state.game,
+                buildings: { ...state.game.buildings, [buildingId]: { ...building, workerIds, noAutoAssign: true } },
+                units: newUnits,
+              },
+              occupants: newOccupants,
+            };
+          }, false, 'dismissWorker');
         },
 
         placeRoadPath: (positions) => {
@@ -421,6 +578,7 @@ export const useStore = create<Store>()(
             level: 1,
             workerIds: [],
             inventory: {},
+            productionProgress: 0,
           };
           set((state) => ({ game: { ...state.game, buildings: { ...state.game.buildings, [id]: building } } }), false, 'placeBuilding');
         },
@@ -500,17 +658,19 @@ export const useStore = create<Store>()(
                   }
 
                   if (sh && unit.carrying && unit.carryingAmount > 0) {
+                    const free = Math.max(0, STOREHOUSE_MAX_ITEMS - storehouseTotal(sh));
+                    const depositing = Math.min(unit.carryingAmount, free);
                     const prev = (sh.inventory[unit.carrying] ?? 0);
                     newBuildings[shId!] = {
                       ...sh,
-                      inventory: { ...sh.inventory, [unit.carrying]: prev + unit.carryingAmount },
+                      inventory: { ...sh.inventory, [unit.carrying]: prev + depositing },
                     };
                     buildingsChanged = true;
 
                     const resType = unit.carrying as HarvestableResource;
                     newResources[unit.ownerId] = {
                       ...newResources[unit.ownerId],
-                      [resType]: (newResources[unit.ownerId]?.[resType] ?? 0) + unit.carryingAmount,
+                      [resType]: (newResources[unit.ownerId]?.[resType] ?? 0) + depositing,
                     };
                     resourcesChanged = true;
                   }
@@ -568,6 +728,67 @@ export const useStore = create<Store>()(
                     };
                     mapChanged = true;
 
+                    const assignedBuilding = unit.assignedBuilding ? newBuildings[unit.assignedBuilding] : null;
+                    const isWoodCutter = assignedBuilding?.type === BuildingType.WoodCutter && tile.resourceType === ResourceType.Wood;
+
+                    if (isWoodCutter) {
+                      const woodcutterProd = BUILDING_PRODUCTION[BuildingType.WoodCutter]!;
+                      const lumberCap = woodcutterProd.outputCapacity[ResourceType.Lumber] ?? Infinity;
+                      const lumberNow = assignedBuilding!.inventory[ResourceType.Lumber] ?? 0;
+                      const buildingHasRoom = lumberNow < lumberCap;
+
+                      if (buildingHasRoom) {
+                        // Deliver lumber to the building — carried to storehouse later.
+                        const dpath = findPath(state.game.map, unit.col, unit.row, assignedBuilding!.col, assignedBuilding!.row);
+                        units[id] = {
+                          ...unit,
+                          state: dpath.length > 0 ? UnitState.Moving : UnitState.Idle,
+                          path: dpath,
+                          targetCol: assignedBuilding!.col, targetRow: assignedBuilding!.row,
+                          collectingTicksRemaining: 0,
+                          depositTarget: null, depositingTicksRemaining: 0,
+                          carrying: ResourceType.Lumber, carryingAmount: harvested,
+                          buildingTask: dpath.length > 0 ? 'deliver' : null,
+                        };
+                      } else {
+                        // Building output full — deposit directly to nearest storehouse.
+                        const storehouse = findNearestStorehouse(newBuildings, unit.col, unit.row);
+                        if (storehouse) {
+                          if (unit.col === storehouse.col && unit.row === storehouse.row) {
+                            units[id] = {
+                              ...unit,
+                              state: UnitState.Depositing,
+                              collectingTicksRemaining: 0,
+                              depositTarget: { col: storehouse.col, row: storehouse.row },
+                              depositingTicksRemaining: DEPOSIT_TICKS,
+                              carrying: ResourceType.Lumber, carryingAmount: harvested,
+                              buildingTask: null,
+                            };
+                          } else {
+                            const depPath = findPath(state.game.map, unit.col, unit.row, storehouse.col, storehouse.row);
+                            units[id] = {
+                              ...unit,
+                              state: depPath.length > 0 ? UnitState.Moving : UnitState.Idle,
+                              path: depPath,
+                              targetCol: storehouse.col, targetRow: storehouse.row,
+                              collectingTicksRemaining: 0,
+                              depositTarget: { col: storehouse.col, row: storehouse.row },
+                              carrying: ResourceType.Lumber, carryingAmount: harvested,
+                              buildingTask: null,
+                            };
+                          }
+                        } else {
+                          // No storehouse — go idle holding the lumber.
+                          units[id] = {
+                            ...unit,
+                            state: UnitState.Idle,
+                            collectingTicksRemaining: 0,
+                            carrying: ResourceType.Lumber, carryingAmount: harvested,
+                            buildingTask: null,
+                          };
+                        }
+                      }
+                    } else {
                     const storehouse = findNearestStorehouse(newBuildings, unit.col, unit.row);
 
                     if (storehouse) {
@@ -617,6 +838,7 @@ export const useStore = create<Store>()(
                       resourcesChanged = true;
                       units[id] = { ...unit, state: UnitState.Idle, collectingTicksRemaining: 0, gatherTarget: null, carrying: tile.resourceType as ResourceType, carryingAmount: harvested };
                     }
+                    } // end else (not WoodCutter)
                   } else {
                     units[id] = { ...unit, state: UnitState.Idle, collectingTicksRemaining: 0, gatherTarget: null };
                   }
@@ -647,20 +869,222 @@ export const useStore = create<Store>()(
                 delete occupants[`${unit.col},${unit.row}`];
                 occupants[`${next.col},${next.row}`] = id;
 
-                // Unit arrives at its assigned building — absorb it.
+                // Unit arrives at its assigned building — register as worker.
                 if (remaining.length === 0 && unit.reportingTo) {
                   const targetBuilding = newBuildings[unit.reportingTo];
 
                   if (targetBuilding && next.col === targetBuilding.col && next.row === targetBuilding.row) {
-                    delete units[id];
+                    const cap  = getWorkerCapacity(targetBuilding.type, targetBuilding.level);
+                    const fits = targetBuilding.workerIds.length < cap;
                     delete occupants[`${next.col},${next.row}`];
-                    newBuildings[unit.reportingTo] = {
-                      ...targetBuilding,
-                      workerIds: [...targetBuilding.workerIds, id],
+                    units[id] = {
+                      ...unit,
+                      prevCol: unit.col, prevRow: unit.row,
+                      col: next.col, row: next.row,
+                      moveProgress: 1, path: [], facing,
+                      reportingTo: null,
+                      assignedBuilding: fits ? unit.reportingTo : null,
+                      buildingTask: null,
+                      gatherTarget: null,
+                      state: UnitState.Idle,
                     };
+
+                    if (fits) {
+                      // Remove from previous building's workerIds if re-assigned.
+                      if (unit.assignedBuilding && unit.assignedBuilding !== unit.reportingTo) {
+                        const prev = newBuildings[unit.assignedBuilding];
+                        if (prev) {
+                          newBuildings[unit.assignedBuilding] = {
+                            ...prev,
+                            workerIds: prev.workerIds.filter(wid => wid !== id),
+                          };
+                        }
+                      }
+                      newBuildings[unit.reportingTo] = {
+                        ...targetBuilding,
+                        workerIds: [...targetBuilding.workerIds, id],
+                      };
+                    }
+
                     buildingsChanged = true;
                     continue;
                   }
+                }
+
+                // Building worker arrives at storehouse to pick up input resource.
+                if (remaining.length === 0 && unit.buildingTask === 'fetch' && unit.assignedBuilding && unit.carrying) {
+                  const sh = Object.values(newBuildings).find(
+                    b => b.type === BuildingType.Storehouse && b.col === next.col && b.row === next.row,
+                  );
+
+                  if (sh && (sh.inventory[unit.carrying] ?? 0) > 0) {
+                    const shId = Object.keys(newBuildings).find(k => newBuildings[k] === sh)!;
+                    newBuildings[shId] = {
+                      ...sh,
+                      inventory: { ...sh.inventory, [unit.carrying]: (sh.inventory[unit.carrying] ?? 0) - 1 },
+                    };
+                    newResources[unit.ownerId] = {
+                      ...newResources[unit.ownerId],
+                      [unit.carrying]: Math.max(0, (newResources[unit.ownerId]?.[unit.carrying as HarvestableResource] ?? 0) - 1),
+                    };
+                    resourcesChanged = true;
+                    buildingsChanged = true;
+
+                    const tgt = newBuildings[unit.assignedBuilding];
+
+                    if (tgt) {
+                      const dpath = findPath(state.game.map, next.col, next.row, tgt.col, tgt.row);
+                      units[id] = {
+                        ...unit,
+                        prevCol: unit.col, prevRow: unit.row,
+                        col: next.col, row: next.row,
+                        moveProgress: dpath.length > 0 ? 0 : 1,
+                        facing,
+                        path: dpath,
+                        targetCol: tgt.col, targetRow: tgt.row,
+                        carryingAmount: 1,
+                        buildingTask: 'deliver',
+                        state: dpath.length > 0 ? UnitState.Moving : UnitState.Idle,
+                      };
+                      continue;
+                    }
+                  }
+
+                  // No resource — go idle.
+                  units[id] = {
+                    ...unit,
+                    prevCol: unit.col, prevRow: unit.row,
+                    col: next.col, row: next.row,
+                    moveProgress: 1, path: [], facing,
+                    carrying: null, carryingAmount: 0,
+                    buildingTask: null,
+                    state: UnitState.Idle,
+                  };
+                  continue;
+                }
+
+                // Building worker arrives at building to pick up output resource.
+                if (remaining.length === 0 && unit.buildingTask === 'fetch-output' && unit.assignedBuilding && unit.carrying) {
+                  const tgt = newBuildings[unit.assignedBuilding];
+
+                  if (tgt && next.col === tgt.col && next.row === tgt.row) {
+                    const available = tgt.inventory[unit.carrying] ?? 0;
+
+                    if (available > 0) {
+                      newBuildings[unit.assignedBuilding] = {
+                        ...tgt,
+                        inventory: { ...tgt.inventory, [unit.carrying]: 0 },
+                      };
+                      buildingsChanged = true;
+
+                      const sh = findNearestStorehouse(newBuildings, next.col, next.row);
+
+                      if (sh) {
+                        const spath = findPath(state.game.map, next.col, next.row, sh.col, sh.row);
+                        units[id] = {
+                          ...unit,
+                          prevCol: unit.col, prevRow: unit.row,
+                          col: next.col, row: next.row,
+                          moveProgress: spath.length > 0 ? 0 : 1, facing,
+                          path: spath,
+                          targetCol: sh.col, targetRow: sh.row,
+                          carryingAmount: available,
+                          buildingTask: 'carry',
+                          state: spath.length > 0 ? UnitState.Moving : UnitState.Idle,
+                        };
+                        continue;
+                      }
+                    }
+                  }
+
+                  const isWorkerHere = unit.assignedBuilding
+                    ? (newBuildings[unit.assignedBuilding]?.workerIds.includes(id) ?? false)
+                    : false;
+
+                  units[id] = {
+                    ...unit,
+                    prevCol: unit.col, prevRow: unit.row,
+                    col: next.col, row: next.row,
+                    moveProgress: 1, path: [], facing,
+                    carrying: null, carryingAmount: 0,
+                    buildingTask: null,
+                    assignedBuilding: isWorkerHere ? unit.assignedBuilding : null,
+                    state: UnitState.Idle,
+                  };
+                  continue;
+                }
+
+                // Building worker arrives at storehouse to deposit output resource.
+                if (remaining.length === 0 && unit.buildingTask === 'carry' && unit.carrying && unit.carryingAmount > 0) {
+                  const sh = Object.values(newBuildings).find(
+                    b => b.type === BuildingType.Storehouse && b.col === next.col && b.row === next.row,
+                  );
+
+                  if (sh) {
+                    const shId = Object.keys(newBuildings).find(k => newBuildings[k] === sh)!;
+                    const free = Math.max(0, STOREHOUSE_MAX_ITEMS - storehouseTotal(sh));
+                    const depositing = Math.min(unit.carryingAmount, free);
+
+                    if (depositing > 0) {
+                      newBuildings[shId] = {
+                        ...sh,
+                        inventory: {
+                          ...sh.inventory,
+                          [unit.carrying]: (sh.inventory[unit.carrying] ?? 0) + depositing,
+                        },
+                      };
+                      newResources[unit.ownerId] = {
+                        ...newResources[unit.ownerId],
+                        [unit.carrying]: (newResources[unit.ownerId]?.[unit.carrying as HarvestableResource] ?? 0) + depositing,
+                      };
+                      buildingsChanged = true;
+                      resourcesChanged = true;
+                    }
+                  }
+
+                  const isProperWorker = unit.assignedBuilding
+                    ? (newBuildings[unit.assignedBuilding]?.workerIds.includes(id) ?? false)
+                    : false;
+
+                  units[id] = {
+                    ...unit,
+                    prevCol: unit.col, prevRow: unit.row,
+                    col: next.col, row: next.row,
+                    moveProgress: 1, path: [], facing,
+                    carrying: null, carryingAmount: 0,
+                    buildingTask: null,
+                    assignedBuilding: isProperWorker ? unit.assignedBuilding : null,
+                    state: UnitState.Idle,
+                  };
+                  continue;
+                }
+
+                // Building worker arrives at building to deposit input resource.
+                if (remaining.length === 0 && unit.buildingTask === 'deliver' && unit.assignedBuilding && unit.carrying && unit.carryingAmount > 0) {
+                  const tgt = newBuildings[unit.assignedBuilding];
+
+                  if (tgt && next.col === tgt.col && next.row === tgt.row) {
+                    newBuildings[unit.assignedBuilding] = {
+                      ...tgt,
+                      inventory: {
+                        ...tgt.inventory,
+                        [unit.carrying]: (tgt.inventory[unit.carrying] ?? 0) + unit.carryingAmount,
+                      },
+                    };
+                    buildingsChanged = true;
+                  }
+
+                  delete occupants[`${next.col},${next.row}`];
+                  units[id] = {
+                    ...unit,
+                    prevCol: unit.col, prevRow: unit.row,
+                    col: next.col, row: next.row,
+                    moveProgress: 1, path: [], facing,
+                    carrying: null, carryingAmount: 0,
+                    buildingTask: null,
+                    state: UnitState.Idle,
+                  };
+                  continue;
                 }
 
                 const microDelay = remaining.length > 0 && Math.random() < 0.25 ? 1 : 0;
@@ -707,55 +1131,241 @@ export const useStore = create<Store>()(
               }
             }
 
-            // Auto-assign idle units to unoccupied buildings.
-            // Count units already en route so we don't double-assign.
-            const enRoute: Record<string, number> = {};
-            for (const u of Object.values(units)) {
-              if (u.reportingTo) enRoute[u.reportingTo] = (enRoute[u.reportingTo] ?? 0) + 1;
+            // Building production cycles.
+            for (const bid of Object.keys(newBuildings)) {
+              const building = newBuildings[bid];
+
+              if (building.constructionProgress < 100 || building.workerIds.length === 0) continue;
+
+              const prod = BUILDING_PRODUCTION[building.type];
+
+              if (!prod || prod.cycleTime === 0) continue;
+
+              const hasInput = (Object.entries(prod.input) as [ResourceType, number][]).every(
+                ([res, needed]) => (building.inventory[res] ?? 0) >= needed,
+              );
+
+              if (!hasInput) {
+                if (building.productionProgress > 0) {
+                  newBuildings[bid] = { ...building, productionProgress: 0 };
+                  buildingsChanged = true;
+                }
+                continue;
+              }
+
+              // Output buffer full — hold progress until a worker clears it.
+              const outputFull = (Object.entries(prod.outputCapacity) as [ResourceType, number][]).some(
+                ([res, cap]) => (building.inventory[res] ?? 0) >= cap,
+              );
+
+              if (outputFull) continue;
+
+              const newProg = (building.productionProgress ?? 0) + 1;
+
+              if (newProg >= prod.cycleTime) {
+                const newInv = { ...building.inventory };
+
+                for (const [res, needed] of Object.entries(prod.input) as [ResourceType, number][]) {
+                  newInv[res as ResourceType] = (newInv[res as ResourceType] ?? 0) - needed;
+                }
+
+                for (const [res, amount] of Object.entries(prod.output) as [ResourceType, number][]) {
+                  newInv[res as ResourceType] = (newInv[res as ResourceType] ?? 0) + amount;
+                }
+
+                newBuildings[bid] = { ...newBuildings[bid], inventory: newInv, productionProgress: 0 };
+                buildingsChanged = true;
+              } else {
+                newBuildings[bid] = { ...building, productionProgress: newProg };
+                buildingsChanged = true;
+              }
             }
 
-            const idlePool = Object.values(units).filter(u => u.state === UnitState.Idle && !u.reportingTo);
-            const assignedThisTick = new Set<string>();
+            // Dispatch idle assigned workers to fetch building inputs.
+            for (const id of Object.keys(units)) {
+              const unit = units[id];
 
-            for (const building of Object.values(newBuildings)) {
-              const capacity = BUILDING_WORKER_CAPACITY[building.type] ?? 0;
+              if (unit.state !== UnitState.Idle || !unit.assignedBuilding || unit.buildingTask) continue;
 
-              if (capacity === 0 || building.constructionProgress < 100) continue;
+              const building = newBuildings[unit.assignedBuilding];
 
-              const filled = building.workerIds.length + (enRoute[building.id] ?? 0);
+              if (!building) continue;
 
-              if (filled >= capacity) continue;
+              const prod = BUILDING_PRODUCTION[building.type];
 
-              // Keep at least 1 idle unit free for the player.
-              const free = idlePool.filter(u => !assignedThisTick.has(u.id));
+              if (!prod) continue;
 
-              if (free.length <= 1) continue;
+              // WoodCutter: gatherer building — carry output out first, then gather more.
+              if (building.type === BuildingType.WoodCutter) {
+                const alreadyCarrying = Object.values(units).some(
+                  u => u.id !== id && u.assignedBuilding === unit.assignedBuilding &&
+                    (u.buildingTask === 'fetch-output' || u.buildingTask === 'carry'),
+                );
 
-              const closest = free.reduce<{ unit: Unit; dist: number } | null>((best, u) => {
-                const dist = Math.abs(u.col - building.col) + Math.abs(u.row - building.row);
+                if (!alreadyCarrying && (building.inventory[ResourceType.Lumber] ?? 0) > 0) {
+                  const fpath = findPath(state.game.map, unit.col, unit.row, building.col, building.row);
 
-                if (!best || dist < best.dist) return { unit: u, dist };
+                  if (fpath.length > 0) {
+                    units[id] = {
+                      ...unit,
+                      state: UnitState.Moving,
+                      path: fpath,
+                      targetCol: building.col, targetRow: building.row,
+                      carrying: ResourceType.Lumber,
+                      carryingAmount: 0,
+                      buildingTask: 'fetch-output',
+                    };
+                    continue;
+                  }
+                }
 
-                return best;
-              }, null);
+                // Don't gather more if output buffer is already full.
+                const lumberCap = prod.outputCapacity[ResourceType.Lumber] ?? Infinity;
+                const lumberNow = building.inventory[ResourceType.Lumber] ?? 0;
 
-              if (!closest) continue;
+                if (lumberNow >= lumberCap) continue;
 
-              const reportPath = findPath(state.game.map, closest.unit.col, closest.unit.row, building.col, building.row);
+                // Gather wood from nearby forest tiles.
+                const GATHER_RADIUS = 10;
+                let bestTile: { col: number; row: number } | null = null;
+                let bestDist = Infinity;
 
-              if (reportPath.length === 0) continue;
+                for (let dc = -GATHER_RADIUS; dc <= GATHER_RADIUS; dc++) {
+                  for (let dr = -GATHER_RADIUS; dr <= GATHER_RADIUS; dr++) {
+                    const tc = building.col + dc, tr = building.row + dr;
+                    const tile = newTiles[`${tc},${tr}`] ?? tiles[`${tc},${tr}`];
 
-              units[closest.unit.id] = {
-                ...closest.unit,
-                reportingTo: building.id,
-                state: UnitState.Moving,
-                path: reportPath,
-                targetCol: building.col,
-                targetRow: building.row,
-                gatherTarget: null,
-                collectingTicksRemaining: 0,
-              };
-              assignedThisTick.add(closest.unit.id);
+                    if (!tile?.hasResource || tile.resourceType !== ResourceType.Wood) continue;
+
+                    const takenByPeer = Object.values(units).some(
+                      u => u.id !== id && u.assignedBuilding === unit.assignedBuilding &&
+                        u.gatherTarget?.col === tc && u.gatherTarget?.row === tr,
+                    );
+
+                    if (takenByPeer) continue;
+
+                    const dist = Math.abs(dc) + Math.abs(dr);
+
+                    if (dist < bestDist) { bestDist = dist; bestTile = { col: tc, row: tr }; }
+                  }
+                }
+
+                if (bestTile) {
+                  const gpath = findPath(state.game.map, unit.col, unit.row, bestTile.col, bestTile.row);
+
+                  if (gpath.length > 0) {
+                    units[id] = {
+                      ...unit,
+                      state: UnitState.Moving,
+                      path: gpath,
+                      targetCol: bestTile.col, targetRow: bestTile.row,
+                      gatherTarget: bestTile,
+                      collectingTicksRemaining: 0,
+                      buildingTask: null,
+                    };
+                  }
+                }
+                continue;
+              }
+
+              const alreadyCarrying = Object.values(units).some(
+                u => u.id !== id && u.assignedBuilding === unit.assignedBuilding &&
+                  (u.buildingTask === 'fetch-output' || u.buildingTask === 'carry'),
+              );
+
+              if (!alreadyCarrying) {
+                for (const [res] of Object.entries(prod.output) as [ResourceType, number][]) {
+                  const available = building.inventory[res] ?? 0;
+
+                  if (available <= 0) continue;
+
+                  const fpath = findPath(state.game.map, unit.col, unit.row, building.col, building.row);
+
+                  if (fpath.length === 0) continue;
+
+                  units[id] = {
+                    ...unit,
+                    state: UnitState.Moving,
+                    path: fpath,
+                    targetCol: building.col, targetRow: building.row,
+                    carrying: res,
+                    carryingAmount: 0,
+                    buildingTask: 'fetch-output',
+                  };
+                  break;
+                }
+
+                if (units[id] !== unit) continue;
+              }
+
+              for (const [res] of Object.entries(prod.input) as [ResourceType, number][]) {
+                const cap = prod.inputCapacity?.[res] ?? 1;
+
+                if ((building.inventory[res] ?? 0) >= cap) continue;
+
+                const sh = findStorehouseWithResource(newBuildings, res, unit.col, unit.row);
+
+                if (!sh) continue;
+
+                const fpath = findPath(state.game.map, unit.col, unit.row, sh.col, sh.row);
+
+                if (fpath.length === 0) continue;
+
+                units[id] = {
+                  ...unit,
+                  state: UnitState.Moving,
+                  path: fpath,
+                  targetCol: sh.col, targetRow: sh.row,
+                  carrying: res,
+                  carryingAmount: 0,
+                  buildingTask: 'fetch',
+                };
+                break;
+              }
+            }
+
+            // Dispatch free idle units to carry output from any building to storehouse.
+            for (const id of Object.keys(units)) {
+              const unit = units[id];
+
+              if (unit.state !== UnitState.Idle || unit.assignedBuilding || unit.buildingTask || unit.reportingTo) continue;
+
+              for (const building of Object.values(newBuildings)) {
+                const prod = BUILDING_PRODUCTION[building.type];
+
+                if (!prod) continue;
+
+                for (const [res] of Object.entries(prod.output) as [ResourceType, number][]) {
+                  const available = building.inventory[res] ?? 0;
+
+                  if (available <= 0) continue;
+
+                  const alreadyHandled = Object.values(units).some(
+                    u => u.id !== id && u.assignedBuilding === building.id &&
+                      (u.buildingTask === 'fetch-output' || u.buildingTask === 'carry'),
+                  );
+
+                  if (alreadyHandled) continue;
+
+                  const fpath = findPath(state.game.map, unit.col, unit.row, building.col, building.row);
+
+                  if (fpath.length === 0) continue;
+
+                  units[id] = {
+                    ...unit,
+                    state: UnitState.Moving,
+                    path: fpath,
+                    targetCol: building.col, targetRow: building.row,
+                    carrying: res as ResourceType,
+                    carryingAmount: 0,
+                    buildingTask: 'fetch-output',
+                    assignedBuilding: building.id,
+                  };
+                  break;
+                }
+
+                if (units[id] !== unit) break;
+              }
             }
 
             return {

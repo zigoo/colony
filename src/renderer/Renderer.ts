@@ -4,6 +4,7 @@ import { renderResources } from './layers/ResourceLayer';
 import { renderBuildings, renderPlacementPreview } from './layers/BuildingLayer';
 import { renderSelection } from './layers/SelectionLayer';
 import { renderUnits } from './layers/UnitLayer';
+import { renderDebugResourceDots } from './layers/DebugLayer';
 
 export const render = (
   ctx: CanvasRenderingContext2D,
@@ -28,5 +29,15 @@ export const render = (
   renderUnits(ctx, state.units, ui.selectedUnitIds, timestamp, camera);
   renderPlacementPreview(ctx, ui.selectedBuildingType, timestamp);
 
+  if (ui.debug) renderDebugResourceDots(ctx, state.map);
+
   ctx.restore();
+
+  if (ui.debug) {
+    ctx.save();
+    ctx.font = 'bold 11px monospace';
+    ctx.fillStyle = 'rgba(255,80,80,0.9)';
+    ctx.fillText('DEBUG', 8, screenHeight - 8);
+    ctx.restore();
+  }
 };

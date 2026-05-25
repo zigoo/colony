@@ -4,7 +4,7 @@ import { screenToGrid, screenToWorld, worldToScreen, gridToWorld, isWithinBounds
 import { CAMERA_ZOOM_STEP_IN, CAMERA_ZOOM_STEP_OUT, MIN_DRAG_DISTANCE, ANIMATION_FRAME_SIZE, SPRITE_Y_OFFSET, TILE_H } from '../game/constants';
 import type { Unit, CameraState, Building } from '../game/types';
 import { BuildingType } from '../game/types';
-import { canPlaceBuilding, getFootprintTiles, BUILDING_FOOTPRINT, BUILDING_WORKER_CAPACITY } from '../game/buildingConfig';
+import { canPlaceBuilding, BUILDING_FOOTPRINT } from '../game/buildingConfig';
 import { findRoadPath } from '../game/pathfinding';
 import { placementPreview, roadPreview } from '../renderer/placementPreview';
 import { foodHover, stoneHover } from '../renderer/layers/ResourceLayer';
@@ -40,6 +40,7 @@ const findUnitAtWorld = (
 const BUILDING_HIT_SIZE: Partial<Record<BuildingType, { w: number; h: number }>> = {
   [BuildingType.LumberCamp]: { w: 64, h: 96 },
   [BuildingType.Storehouse]: { w: 64, h: 213 },
+  [BuildingType.WoodCutter]: { w: 64, h: 96 },
 };
 
 const findBuildingAtWorld = (
@@ -92,7 +93,7 @@ const findUnitsInScreenBox = (
 };
 
 export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): void => {
-  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, selectBuilding, setSelectionBox, moveUnitTo, commandGather, commandReport, placeBuilding, placeRoadPath, rebuildOccupants } = useStore();
+  const { panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, selectBuilding, setSelectionBox, moveUnitTo, commandGather, placeBuilding, placeRoadPath, rebuildOccupants, toggleDebug } = useStore();
   const isDragging = useRef(false);
   const isShiftSelecting = useRef(false);
   const lastRoadCursorKey = useRef<string | null>(null);
@@ -253,12 +254,9 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
           } else if (isWithinBounds(col, row)) {
             if (ui.selectedUnitIds.length > 0) {
               const tile = game.map.tiles[`${col},${row}`];
-              const targetBuilding = findBuildingAtWorld(worldPos.x, worldPos.y, game.buildings);
 
               if (tile?.hasResource) {
                 commandGather(ui.selectedUnitIds, col, row);
-              } else if (targetBuilding && (BUILDING_WORKER_CAPACITY[targetBuilding.type] ?? 0) > 0) {
-                commandReport(ui.selectedUnitIds, targetBuilding.id);
               } else {
                 ui.selectedUnitIds.forEach((id, index) => moveUnitTo(id, col, row, index * 2));
               }
@@ -297,6 +295,10 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       el.height = window.innerHeight;
     };
 
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'd' || e.key === 'D') toggleDebug();
+    };
+
     const onContextMenu = (e: MouseEvent) => { e.preventDefault(); };
 
     el.addEventListener('mousedown', onMouseDown);
@@ -306,6 +308,7 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
     el.addEventListener('contextmenu', onContextMenu);
     el.addEventListener('mouseleave', onMouseLeave);
     window.addEventListener('resize', onResize);
+    window.addEventListener('keydown', onKeyDown);
 
     return () => {
       el.removeEventListener('mousedown', onMouseDown);
@@ -315,6 +318,7 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
       el.removeEventListener('contextmenu', onContextMenu);
       el.removeEventListener('mouseleave', onMouseLeave);
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('keydown', onKeyDown);
     };
-  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, selectBuilding, setSelectionBox, moveUnitTo, commandGather, commandReport, placeBuilding, placeRoadPath]);
+  }, [canvas, panCamera, zoomCamera, setScreenSize, selectTile, selectUnits, selectBuildingType, selectBuilding, setSelectionBox, moveUnitTo, commandGather, placeBuilding, placeRoadPath, toggleDebug]);
 };

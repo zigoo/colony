@@ -18,7 +18,8 @@ const MENU: Category[] = [
         id: 'wood',
         label: 'Wood',
         buildings: [
-          { type: BuildingType.LumberCamp, icon: '🪵' },
+          { type: BuildingType.WoodCutter,  icon: '🪓' },
+          { type: BuildingType.LumberCamp,  icon: '🪵' },
         ],
       },
       {

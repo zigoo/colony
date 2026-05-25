@@ -2,26 +2,28 @@ import { useStore, PLAYER_ID } from '../store';
 import { ResourceType, UnitState } from '../game/types';
 
 export const HUD = () => {
-  const resources  = useStore((state) => state.game.resources[PLAYER_ID]);
+  const resources   = useStore((state) => state.game.resources[PLAYER_ID]);
   const selectedCol = useStore((state) => state.ui.selectedCol);
   const selectedRow = useStore((state) => state.ui.selectedRow);
-  const map        = useStore((state) => state.game.map);
-  const units      = useStore((state) => state.game.units);
-  const buildings  = useStore((state) => state.game.buildings);
+  const map         = useStore((state) => state.game.map);
+  const units       = useStore((state) => state.game.units);
 
-  const mapUnits      = Object.values(units);
-  const absorbedCount = Object.values(buildings).reduce((s, b) => s + b.workerIds.length, 0);
-  const totalPeople   = mapUnits.length + absorbedCount;
-  const workingCount  = absorbedCount + mapUnits.filter(u =>
+  const allUnits     = Object.values(units);
+  const totalPeople  = allUnits.length;
+  const workingCount = allUnits.filter(u =>
+    u.assignedBuilding !== null ||
     u.state === UnitState.Collecting ||
     u.state === UnitState.Depositing ||
-    (u.state === UnitState.Moving && u.gatherTarget !== null)
+    (u.state === UnitState.Moving && u.gatherTarget !== null),
   ).length;
 
   const selectedTile =
     selectedCol !== null && selectedRow !== null
       ? map.tiles[`${selectedCol},${selectedRow}`]
       : null;
+
+  const lumber = resources?.[ResourceType.Lumber] ?? 0;
+  const planks = resources?.[ResourceType.Planks] ?? 0;
 
   return (
     <div style={{
@@ -40,6 +42,8 @@ export const HUD = () => {
         <span>Stone: {resources?.[ResourceType.Stone] ?? 0}</span>
         <span>Food: {resources?.[ResourceType.Food] ?? 0}</span>
         <span>Ore: {resources?.[ResourceType.Ore] ?? 0}</span>
+        {lumber > 0 && <span style={{ color: '#c8a86a' }}>Lumber: {lumber}</span>}
+        {planks > 0 && <span style={{ color: '#e8c87a' }}>Planks: {planks}</span>}
       </div>
 
       {selectedTile && (

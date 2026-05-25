@@ -1,15 +1,98 @@
-import { BuildingType, TileType } from './types';
+import { BuildingType, ResourceType, TileType } from './types';
 import type { Tile, Building } from './types';
 
 // Tile footprint [cols, rows] — shared by rendering (anchor calc) and placement validation.
 export const BUILDING_FOOTPRINT: Partial<Record<BuildingType, [number, number]>> = {
   [BuildingType.LumberCamp]: [2, 2],
   [BuildingType.Storehouse]: [2, 2],
+  [BuildingType.WoodCutter]: [2, 2],
 };
 
-// How many worker units a building can absorb.
-export const BUILDING_WORKER_CAPACITY: Partial<Record<BuildingType, number>> = {
-  [BuildingType.LumberCamp]: 1,
+export interface BuildingLevelConfig {
+  maxWorkers: number;
+}
+
+// Per-level progression for each building type.
+// Index = level - 1. Output uses diminishing-returns formula (see getCurrentOutput).
+export const BUILDING_LEVEL_CONFIG: Partial<Record<BuildingType, BuildingLevelConfig[]>> = {
+  [BuildingType.LumberCamp]: [
+    { maxWorkers: 2 },  // level 1
+    { maxWorkers: 3 },  // level 2
+    { maxWorkers: 4 },  // level 3
+  ],
+  [BuildingType.WoodCutter]: [
+    { maxWorkers: 2 },  // level 1
+    { maxWorkers: 3 },  // level 2
+    { maxWorkers: 4 },  // level 3
+  ],
+};
+
+export interface BuildingProductionConfig {
+  input: Partial<Record<ResourceType, number>>;
+  inputCapacity: Partial<Record<ResourceType, number>>;
+  output: Partial<Record<ResourceType, number>>;
+  outputCapacity: Partial<Record<ResourceType, number>>;
+  cycleTime: number;
+}
+
+export const BUILDING_PRODUCTION: Partial<Record<BuildingType, BuildingProductionConfig>> = {
+  [BuildingType.LumberCamp]: {
+    input:          { [ResourceType.Lumber]: 1 },
+    inputCapacity:  { [ResourceType.Lumber]: 20 },
+    output:         { [ResourceType.Planks]: 2 },
+    outputCapacity: { [ResourceType.Planks]: 20 },
+    cycleTime:      30,
+  },
+  // WoodCutter: workers gather from forest, cycleTime 0 = no production cycle.
+  [BuildingType.WoodCutter]: {
+    input:          {},
+    inputCapacity:  {},
+    output:         { [ResourceType.Lumber]: 1 },
+    outputCapacity: { [ResourceType.Lumber]: 20 },
+    cycleTime:      0,
+  },
+};
+
+export const getLevelConfig = (type: BuildingType, level: number): BuildingLevelConfig | null => {
+  const configs = BUILDING_LEVEL_CONFIG[type];
+
+  if (!configs) return null;
+
+  return configs[Math.min(level - 1, configs.length - 1)] ?? null;
+};
+
+export const getWorkerCapacity = (type: BuildingType, level: number): number =>
+  getLevelConfig(type, level)?.maxWorkers ?? 0;
+
+// Output multiplier for the given worker count.
+// Each additional worker adds 70% of the previous one (diminishing returns).
+//   1 worker  → 1.00×
+//   2 workers → 1.70×
+//   3 workers → 2.19×
+export const getCurrentOutput = (type: BuildingType, level: number, workers: number): number => {
+  const capacity = getWorkerCapacity(type, level);
+
+  if (capacity === 0 || workers === 0) return 0;
+
+  const w = Math.min(workers, capacity);
+  let sum = 0;
+
+  for (let i = 0; i < w; i++) sum += Math.pow(0.7, i);
+
+  return Math.round(sum * 100) / 100;
+};
+
+// Efficiency as 0–1 fraction: currentOutput / maxPossibleOutput at this level.
+export const getEfficiency = (type: BuildingType, level: number, workers: number): number => {
+  const capacity = getWorkerCapacity(type, level);
+
+  if (capacity === 0) return 0;
+
+  const maxOutput = getCurrentOutput(type, level, capacity);
+
+  if (maxOutput === 0) return 0;
+
+  return getCurrentOutput(type, level, workers) / maxOutput;
 };
 
 export const getFootprintTiles = (
@@ -19,11 +102,13 @@ export const getFootprintTiles = (
 ): Array<{ col: number; row: number }> => {
   const [fcols, frows] = BUILDING_FOOTPRINT[type] ?? [1, 1];
   const tiles: Array<{ col: number; row: number }> = [];
+
   for (let c = col; c < col + fcols; c++) {
     for (let r = row; r < row + frows; r++) {
       tiles.push({ col: c, row: r });
     }
   }
+
   return tiles;
 };
 

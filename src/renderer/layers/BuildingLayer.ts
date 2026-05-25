@@ -47,9 +47,14 @@ type StageRenderConfig = {
 // BuildingTypes without a config entry are silently skipped in renderBuildings.
 const STAGE_CONFIG: Partial<Record<BuildingType, Record<BuildingStage, StageRenderConfig>>> = {
   [BuildingType.LumberCamp]: {
-    [BuildingStage.Unoccupied]: { key: 'sawmill_unoccupied', srcW: 1024, srcH: 1024, destW: 64, destH: 96, frames: 1, fps: 1 },
-    [BuildingStage.Settled]:    { key: 'sawmill_settled',    srcW: 1024, srcH: 1024, destW: 64, destH: 96, frames: 1, fps: 1 },
-    [BuildingStage.Working]:    { key: 'sawmill_working',    srcW: 64,   srcH: 96,   destW: 64, destH: 96, frames: 11, fps: 11 },
+    [BuildingStage.Unoccupied]: { key: 'sawmill_unoccupied', srcW: 512, srcH: 768, destW: 64, destH: 96, frames: 1, fps: 1 },
+    [BuildingStage.Settled]:    { key: 'sawmill_settled',    srcW: 512, srcH: 768, destW: 64, destH: 96, frames: 1, fps: 1 },
+    [BuildingStage.Working]:    { key: 'sawmill_working',    srcW: 512, srcH: 768, destW: 64, destH: 96, frames: 8, fps: 8 },
+  },
+  [BuildingType.WoodCutter]: {
+    [BuildingStage.Unoccupied]: { key: 'woodcutter_unoccupied', srcW: 512, srcH: 768, destW: 64, destH: 96, frames: 1, fps: 1 },
+    [BuildingStage.Settled]:    { key: 'woodcutter_settled',    srcW: 512, srcH: 768, destW: 64, destH: 96, frames: 1, fps: 1 },
+    [BuildingStage.Working]:    { key: 'woodcutter_working',    srcW: 512, srcH: 768, destW: 64, destH: 96, frames: 8, fps: 8 },
   },
 };
 
@@ -59,9 +64,10 @@ const footprintAnchorY = (type: BuildingType, wy: number): number => {
 };
 
 const getBuildingStage = (building: Building): BuildingStage => {
-  if (building.workerIds.length > 0) return BuildingStage.Working;
-  if (Object.values(building.inventory).some(v => (v ?? 0) > 0)) return BuildingStage.Settled;
-  return BuildingStage.Unoccupied;
+  if (building.workerIds.length === 0) return BuildingStage.Unoccupied;
+  if (building.type === BuildingType.WoodCutter) return BuildingStage.Working;
+  if (building.productionProgress > 0) return BuildingStage.Working;
+  return BuildingStage.Settled;
 };
 
 export const renderPlacementPreview = (
