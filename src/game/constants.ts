@@ -15,18 +15,36 @@ export const MIN_ZOOM_FOR_RESOURCES = 0.5;
 export const RESOURCE_DOT_MIN_SCREEN_RADIUS = 2.5;
 export const RESOURCE_DOT_MAX_SCREEN_RADIUS = 9;
 
+// ── TERRAIN TUNING (how much of each thing the map has) ─────────────────────
+// Tiles are classified by elevation noise (0..1). Each threshold is the UPPER
+// bound of a band; the band's width = how much of that terrain there is.
+//   water:  raise → MORE water.            band [0, water)
+//   sand:   shoreline width.               band [water, sand)
+//   forest: top of the land band.          band [sand, forest) = grass + forest
+//   stone:  raise → MORE stone, LESS mountain. band [forest, stone) = stone
+//           everything above `stone` is Mountain (impassable).
+// So: more stone → raise `stone` (or lower `forest`); more grass → raise `forest`.
 export const ELEVATION_THRESHOLDS = {
-  water:    0.20,
-  sand:     0.28,
-  grass:    0.55,
-  forest:   0.70,  // top of the land band (grass/forest); above is stone
-  stone:    0.89,  // raised so fewer tiles become Mountain (was 0.85)
+  water:    0.30,
+  sand:     0.325,
+  grass:    0.55,  // (2D texture color ramp only; classification uses the band below)
+  forest:   0.695,
+  stone:    0.82,
 } as const;
 
-// Forest is scattered across the land band by a separate noise (so it isn't
-// just a ring below the mountains). Higher threshold = sparser forest.
+// Water bodies smaller than this many connected tiles are drained to grass.
+// Raise → only bigger lakes survive (fewer small ponds); lower → keep more ponds.
+export const MIN_WATER_REGION_TILES = 300;
+
+// Forest is scattered across the land band by a separate noise.
+//   FOREST_NOISE_THRESHOLD: raise → LESS forest (sparser).
+//   FOREST_NOISE_SCALE:     raise → smaller, more frequent clumps.
 export const FOREST_NOISE_SCALE = 4;
-export const FOREST_NOISE_THRESHOLD = 0.28;
+export const FOREST_NOISE_THRESHOLD = 0.50;
+
+// Harvestable nodes ON forest/stone tiles (NOT terrain coverage): chance a tile
+// carries a resource, and how many units it holds. See RESOURCE_SPAWN_CHANCE
+// and RESOURCE_AMOUNT below to tune wood/stone/food/ore richness.
 
 export const RESOURCE_SPAWN_CHANCE = {
   forest: 0.3,

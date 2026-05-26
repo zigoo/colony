@@ -4,7 +4,7 @@ import type { MapState, Tile } from './types';
 import {
   MAP_COLS, MAP_ROWS,
   ELEVATION_THRESHOLDS, RESOURCE_SPAWN_CHANCE, RESOURCE_AMOUNT,
-  TILE_MOVE_COSTS, FOREST_NOISE_SCALE, FOREST_NOISE_THRESHOLD,
+  TILE_MOVE_COSTS, FOREST_NOISE_SCALE, FOREST_NOISE_THRESHOLD, MIN_WATER_REGION_TILES,
 } from './constants';
 
 const mulberry32 = (seed: number) => () => {
@@ -92,5 +92,56 @@ export const generateMap = (initialSeed?: number): MapState => {
     }
   }
 
+  drainSmallPonds(tiles);
+
   return { tiles, seed, width: MAP_COLS, height: MAP_ROWS, version: 1 };
+};
+
+// Converts water bodies smaller than MIN_WATER_REGION_TILES to grass, so the
+// map has coherent lakes instead of scattered little ponds.
+const drainSmallPonds = (tiles: Record<string, Tile>): void => {
+  const seen = new Uint8Array(MAP_COLS * MAP_ROWS);
+  const NEIGHBORS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+  for (let row = 0; row < MAP_ROWS; row++) {
+    for (let col = 0; col < MAP_COLS; col++) {
+      const start = row * MAP_COLS + col;
+
+      if (seen[start] || tiles[`${col},${row}`].type !== TileType.Water) continue;
+
+      // Flood-fill this connected water region.
+      const region: Tile[] = [];
+      const stack = [[col, row]];
+      seen[start] = 1;
+
+      while (stack.length > 0) {
+        const [c, r] = stack.pop()!;
+        region.push(tiles[`${c},${r}`]);
+
+        for (const [dc, dr] of NEIGHBORS) {
+          const nc = c + dc;
+          const nr = r + dr;
+
+          if (nc < 0 || nr < 0 || nc >= MAP_COLS || nr >= MAP_ROWS) continue;
+
+          const ni = nr * MAP_COLS + nc;
+
+          if (seen[ni] || tiles[`${nc},${nr}`].type !== TileType.Water) continue;
+
+          seen[ni] = 1;
+          stack.push([nc, nr]);
+        }
+      }
+
+      if (region.length < MIN_WATER_REGION_TILES) {
+        for (const tile of region) {
+          tile.type = TileType.Grass;
+          tile.moveCost = TILE_MOVE_COSTS[TileType.Grass];
+          tile.hasResource = false;
+          tile.resourceType = ResourceType.None;
+          tile.resourceAmount = 0;
+        }
+      }
+    }
+  }
 };

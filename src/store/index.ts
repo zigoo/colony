@@ -1686,7 +1686,7 @@ export const useStore = create<Store>()(
         },
       }),
       {
-        name: 'settlers-v7',
+        name: 'settlers-v9',
         // The tile map (240×240) is far too big for localStorage, so persist
         // everything except the tiles and regenerate them from the seed on load
         // (the map is deterministic). Note: per-tile mutations (roads, harvested
