@@ -4,10 +4,6 @@ import { SEASONS } from '../renderer/gl/dayNightCycle';
 const SEASON_ICON = ['🌱', '☀️', '🍂', '❄️'];
 
 const box: React.CSSProperties = {
-  position: 'fixed',
-  bottom: 10,
-  right: 10,
-  zIndex: 50,
   padding: '6px 12px',
   background: 'rgba(20,24,30,0.82)',
   border: '1px solid rgba(255,255,255,0.12)',

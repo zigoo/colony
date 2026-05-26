@@ -15,7 +15,7 @@ const CAMERA_NEAR = 0.1;
 const CAMERA_FAR = 3000;
 const MIN_ZOOM = 0.3;
 const MAX_ZOOM = 6;
-const PAN_SPEED = 0.7;
+const PAN_SPEED = 1.26; // 180% of the previous feel
 const MAX_PIXEL_RATIO = 2;
 
 // Water surface sits just below the sand shoreline (-0.02), scaled by terrain

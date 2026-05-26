@@ -3,6 +3,7 @@ import { GameCanvas } from './components/GameCanvas';
 import { GameCanvasGL } from './components/GameCanvasGL';
 import { GLDevPanel } from './components/GLDevPanel';
 import { WorldClockIndicator } from './components/WorldClockIndicator';
+import { ZoomButtons } from './components/ZoomButtons';
 import { UnitTooltip } from './components/UnitTooltip';
 import { UnitInfoPanel } from './components/UnitInfoPanel';
 import { HUD } from './components/HUD';
@@ -33,7 +34,12 @@ export default function App() {
         {glRenderer ? 'WebGL (three.js) — press G for 2D' : '2D canvas — press G for WebGL'}
       </div>
       {glRenderer && <GLDevPanel />}
-      {glRenderer && <WorldClockIndicator />}
+      {glRenderer && (
+        <div style={{ position: 'fixed', bottom: 10, right: 10, zIndex: 50, display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+          <ZoomButtons />
+          <WorldClockIndicator />
+        </div>
+      )}
       {glRenderer && <SelectionBox />}
       {glRenderer && <UnitTooltip />}
       {glRenderer && <UnitInfoPanel />}

@@ -5,10 +5,13 @@ import { useGLParams } from '../renderer/gl/glParams';
 import { computeSky } from '../renderer/gl/dayNightCycle';
 import { useWorldClock } from '../renderer/gl/worldClock';
 import { useUnitHover } from '../renderer/gl/unitHover';
+import { registerZoom } from '../renderer/gl/glControls';
 import { MIN_DRAG_DISTANCE, CAMERA_ZOOM_STEP_IN, CAMERA_ZOOM_STEP_OUT } from '../game/constants';
 
 const TICK_MS = 100;
 const MAX_FRAME_DELTA_MS = 200; // clamp so a backgrounded tab doesn't fast-forward ticks
+const EDGE_PAN_MARGIN = 28;     // px from a screen edge that triggers edge-scroll
+const EDGE_PAN_SPEED = 14;      // equivalent drag pixels/frame at the very edge
 
 const toNdc = (e: MouseEvent): { x: number; y: number } => ({
   x: (e.clientX / window.innerWidth) * 2 - 1,
@@ -26,6 +29,7 @@ export const GameCanvasGL = () => {
     glScene.applyParams(useGLParams.getState());
     glScene.resize(window.innerWidth, window.innerHeight);
     glScene.setMap(useStore.getState().game.map);
+    registerZoom((factor) => glScene.zoom(factor));
 
     // Rebuild terrain only when the map object identity changes (new map gen).
     let lastMap = useStore.getState().game.map;
@@ -45,6 +49,8 @@ export const GameCanvasGL = () => {
     let hasMoved = false;
     let last = { x: 0, y: 0 };
     let down = { x: 0, y: 0 };
+    let mouseX = -1; // for edge-scroll; -1 = cursor outside the window
+    let mouseY = -1;
 
     const onMouseDown = (e: MouseEvent) => {
       hasMoved = false;
@@ -73,6 +79,19 @@ export const GameCanvasGL = () => {
 
         return;
       }
+
+      // Over a UI panel (not the canvas) → suppress edge-scroll, hover and picking.
+      if (e.target !== el) {
+        mouseX = -1;
+        mouseY = -1;
+        glScene.setHover(null);
+        useUnitHover.getState().set(null, 0, 0);
+
+        return;
+      }
+
+      mouseX = e.clientX;
+      mouseY = e.clientY;
 
       const n = toNdc(e);
       const cell = glScene.pickTile(n.x, n.y);
@@ -121,6 +140,8 @@ export const GameCanvasGL = () => {
     const onMouseLeave = () => {
       glScene.setHover(null);
       useUnitHover.getState().set(null, 0, 0);
+      mouseX = -1;
+      mouseY = -1;
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -180,6 +201,22 @@ export const GameCanvasGL = () => {
         accumulator -= TICK_MS;
       }
 
+      // Edge-scroll: hold the cursor near a screen edge to pan the map.
+      if (!dragging && !boxSelecting && mouseX >= 0) {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        let ex = 0;
+        let ey = 0;
+
+        if (mouseX < EDGE_PAN_MARGIN) ex = (EDGE_PAN_MARGIN - mouseX) / EDGE_PAN_MARGIN;
+        else if (mouseX > w - EDGE_PAN_MARGIN) ex = -(mouseX - (w - EDGE_PAN_MARGIN)) / EDGE_PAN_MARGIN;
+
+        if (mouseY < EDGE_PAN_MARGIN) ey = (EDGE_PAN_MARGIN - mouseY) / EDGE_PAN_MARGIN;
+        else if (mouseY > h - EDGE_PAN_MARGIN) ey = -(mouseY - (h - EDGE_PAN_MARGIN)) / EDGE_PAN_MARGIN;
+
+        if (ex !== 0 || ey !== 0) glScene.pan(ex * EDGE_PAN_SPEED, ey * EDGE_PAN_SPEED);
+      }
+
       const p = useGLParams.getState();
       const { game } = useStore.getState();
       const sky = computeSky(game.tick, p.dayLengthSec, p.sunIntensity, p.hemiIntensity);
@@ -194,6 +231,7 @@ export const GameCanvasGL = () => {
 
     return () => {
       cancelAnimationFrame(rafId);
+      registerZoom(null);
       unsubMap();
       unsubParams();
       unsubSel();
