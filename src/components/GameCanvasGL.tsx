@@ -8,6 +8,11 @@ import { useUnitHover } from '../renderer/gl/unitHover';
 import { registerZoom } from '../renderer/gl/glControls';
 import { useFps } from '../renderer/gl/fps';
 import { MIN_DRAG_DISTANCE, CAMERA_ZOOM_STEP_IN, CAMERA_ZOOM_STEP_OUT } from '../game/constants';
+import { canPlaceBuilding } from '../game/buildingConfig';
+
+const HOVER_COLOR = '#ffe14d';
+const PLACE_OK_COLOR = '#5fda7d';
+const PLACE_BAD_COLOR = '#e05050';
 
 const TICK_MS = 100;
 const MAX_FRAME_DELTA_MS = 200; // clamp so a backgrounded tab doesn't fast-forward ticks
@@ -100,6 +105,18 @@ export const GameCanvasGL = () => {
       glScene.setHover(cell);
 
       const st = useStore.getState();
+      const placing = st.ui.selectedBuildingType;
+
+      if (placing) {
+        // Show placement validity; suppress the unit hover tooltip.
+        const ok = cell !== null && canPlaceBuilding(placing, cell.col, cell.row, st.game.map.tiles, st.game.buildings);
+        glScene.setHoverColor(ok ? PLACE_OK_COLOR : PLACE_BAD_COLOR);
+        useUnitHover.getState().set(null, 0, 0);
+
+        return;
+      }
+
+      glScene.setHoverColor(HOVER_COLOR);
       const hoveredId = cell ? st.occupants[`${cell.col},${cell.row}`] : undefined;
       useUnitHover.getState().set(hoveredId ? st.game.units[hoveredId]?.name ?? null : null, e.clientX, e.clientY);
     };
@@ -115,13 +132,20 @@ export const GameCanvasGL = () => {
         return;
       }
 
-      // A click (no meaningful drag) selects a unit, commands selected units, or
-      // selects an empty tile — mirroring the 2D renderer's interaction.
+      // A click (no meaningful drag): place a building if one is selected, else
+      // select a unit, command selected units, or select a tile.
       if (dragging && !hasMoved) {
         const n = toNdc(e);
         const cell = glScene.pickTile(n.x, n.y);
+        const placing = store.ui.selectedBuildingType;
 
-        if (!cell) {
+        if (placing) {
+          if (cell && canPlaceBuilding(placing, cell.col, cell.row, store.game.map.tiles, store.game.buildings)) {
+            store.placeBuilding(placing, cell.col, cell.row);
+            store.selectBuildingType(null);
+            glScene.setHoverColor(HOVER_COLOR);
+          }
+        } else if (!cell) {
           store.selectUnits([]);
           store.selectTile(null, null);
         } else {
@@ -153,6 +177,8 @@ export const GameCanvasGL = () => {
       if (e.key === 'Escape') {
         useStore.getState().selectUnits([]);
         useStore.getState().selectTile(null, null);
+        useStore.getState().selectBuildingType(null);
+        glScene.setHoverColor(HOVER_COLOR);
 
         return;
       }

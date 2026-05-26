@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { UnitState } from '../../game/types';
+import { UnitState, BuildingType } from '../../game/types';
 
 const SETTLER_URL = '/assets/models/settler.glb';
 
@@ -220,4 +220,105 @@ export const createSettlerInstance = (): SettlerInstance | null => {
   }
 
   return { object, mixer, actions };
+};
+
+// ── Buildings ─────────────────────────────────────────────────────────────
+
+interface BuildingModelDef {
+  type: BuildingType;
+  level: number;
+  url: string;
+}
+
+// One GLB per building type + level. Levels without their own model fall back to
+// the highest available level at or below them (see getBuildingTemplate).
+const BUILDING_MODELS: BuildingModelDef[] = [
+  { type: BuildingType.WoodCutter, level: 1, url: '/assets/models/woodcutter_l1.glb' },
+];
+
+interface BuildingTemplate {
+  scene: THREE.Group;
+  size: THREE.Vector3; // bounding-box size of the unscaled model
+  minY: number;        // bounding-box floor (for seating the base on the ground)
+}
+
+const buildingKey = (type: BuildingType, level: number): string => `${type}:${level}`;
+const buildingTemplates = new Map<string, BuildingTemplate>();
+let buildingsLoading: Promise<void> | null = null;
+
+export const loadBuildingModels = (): Promise<void> => {
+  if (buildingsLoading) return buildingsLoading;
+
+  const loader = new GLTFLoader();
+  buildingsLoading = Promise.all(
+    BUILDING_MODELS.map((def) => new Promise<void>((resolve) => {
+      loader.load(
+        def.url,
+        (gltf) => {
+          gltf.scene.traverse((o) => {
+            const mesh = o as THREE.Mesh;
+
+            if (mesh.isMesh) {
+              mesh.castShadow = true;
+              mesh.receiveShadow = true;
+            }
+          });
+
+          const box = new THREE.Box3().setFromObject(gltf.scene);
+          buildingTemplates.set(buildingKey(def.type, def.level), {
+            scene: gltf.scene,
+            size: box.getSize(new THREE.Vector3()),
+            minY: box.min.y,
+          });
+          resolve();
+        },
+        undefined,
+        (err) => {
+          console.error(`Failed to load ${def.url}`, err);
+          resolve();
+        },
+      );
+    })),
+  ).then(() => undefined);
+
+  return buildingsLoading;
+};
+
+// Best available model for a level: exact level, else the highest below it.
+const getBuildingTemplate = (type: BuildingType, level: number): BuildingTemplate | null => {
+  for (let l = level; l >= 1; l--) {
+    const t = buildingTemplates.get(buildingKey(type, l));
+
+    if (t) return t;
+  }
+
+  return null;
+};
+
+export const hasBuildingModel = (type: BuildingType, level: number): boolean =>
+  getBuildingTemplate(type, level) !== null;
+
+export interface BuildingInstance {
+  object: THREE.Object3D;
+  footOffset: number; // world-Y offset (after scaling) that puts the base on the ground
+}
+
+// Clones the building model (sharing geometry/material/textures across instances)
+// and scales it so its larger horizontal dimension fills `footprintTiles * fill`.
+export const createBuildingInstance = (
+  type: BuildingType,
+  level: number,
+  footprintTiles: number,
+  fill: number,
+): BuildingInstance | null => {
+  const t = getBuildingTemplate(type, level);
+
+  if (!t) return null;
+
+  const object = t.scene.clone(true);
+  const modelHoriz = Math.max(t.size.x, t.size.z) || 1;
+  const scale = (footprintTiles * fill) / modelHoriz;
+  object.scale.setScalar(scale);
+
+  return { object, footOffset: -t.minY * scale };
 };

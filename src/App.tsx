@@ -7,6 +7,7 @@ import { ZoomButtons } from './components/ZoomButtons';
 import { UnitTooltip } from './components/UnitTooltip';
 import { UnitInfoPanel } from './components/UnitInfoPanel';
 import { FpsIndicator } from './components/FpsIndicator';
+import { BuildingMenuGL } from './components/BuildingMenuGL';
 import { HUD } from './components/HUD';
 import { Toolbar } from './components/Toolbar';
 import { Minimap } from './components/Minimap';
@@ -45,6 +46,7 @@ export default function App() {
       {glRenderer && <UnitTooltip />}
       {glRenderer && <UnitInfoPanel />}
       {glRenderer && <FpsIndicator />}
+      {glRenderer && <BuildingMenuGL />}
       {!glRenderer && (
         <>
           <HUD />

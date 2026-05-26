@@ -157,7 +157,7 @@ export class GLScene {
     selectedIds: Set<string>,
     dt: number,
   ): void {
-    this.entities.syncBuildings(buildings);
+    this.entities.syncBuildings(buildings, dt);
     this.entities.syncUnits(units, selectedIds, dt);
   }
 
@@ -257,6 +257,11 @@ export class GLScene {
 
   setHover(cell: GridCell | null): void {
     this.placeTile(this.hoverMesh, cell);
+  }
+
+  // Tints the hover tile (e.g. green/red during building placement).
+  setHoverColor(hex: string): void {
+    (this.hoverMesh.material as THREE.MeshBasicMaterial).color.set(hex);
   }
 
   setSelected(cell: GridCell | null): void {
