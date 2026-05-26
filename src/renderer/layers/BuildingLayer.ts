@@ -106,10 +106,26 @@ export const renderPlacementPreview = (
   }
 
   const cfg = STAGE_CONFIG[selectedBuildingType]?.[BuildingStage.Unoccupied];
-  if (!cfg) { ctx.restore(); return; }
+
+  if (!cfg) {
+    ctx.restore();
+    drawMissingSprite(ctx, wx, anchorY);
+    if (!placementPreview.valid) {
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = 'rgb(220,40,40)';
+      ctx.fillRect(wx - 24, anchorY - 48, 48, 48);
+      ctx.restore();
+    }
+    return;
+  }
 
   const img = getBuildingSprite(cfg.key);
-  if (!img?.complete) { ctx.restore(); return; }
+  if (!img?.complete) {
+    ctx.restore();
+    drawMissingSprite(ctx, wx, anchorY);
+    return;
+  }
 
   const frame = cfg.frames > 1 ? Math.floor(timestamp / (1000 / cfg.fps)) % cfg.frames : 0;
   const destX = wx - cfg.destW / 2;
@@ -121,6 +137,22 @@ export const renderPlacementPreview = (
     ctx.fillStyle = 'rgb(220, 40, 40)';
     ctx.fillRect(destX, destY, cfg.destW, cfg.destH);
   }
+  ctx.restore();
+};
+
+const drawMissingSprite = (ctx: CanvasRenderingContext2D, wx: number, anchorY: number): void => {
+  const w = 48, h = 48;
+  ctx.save();
+  ctx.fillStyle = 'rgba(200,30,30,0.85)';
+  ctx.strokeStyle = 'rgba(255,80,80,0.9)';
+  ctx.lineWidth = 2;
+  ctx.fillRect(wx - w / 2, anchorY - h, w, h);
+  ctx.strokeRect(wx - w / 2, anchorY - h, w, h);
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('?', wx, anchorY - h / 2);
   ctx.restore();
 };
 
@@ -188,10 +220,17 @@ export const renderBuildings = (
 
     const stage = getBuildingStage(building);
     const cfg = STAGE_CONFIG[building.type]?.[stage];
-    if (!cfg) continue;
+
+    if (!cfg) {
+      drawMissingSprite(ctx, wx, anchorY);
+      continue;
+    }
 
     const img = getBuildingSprite(cfg.key);
-    if (!img?.complete) continue;
+    if (!img?.complete) {
+      drawMissingSprite(ctx, wx, anchorY);
+      continue;
+    }
 
     const frame = cfg.frames > 1
       ? Math.floor(timestamp / (1000 / cfg.fps)) % cfg.frames
