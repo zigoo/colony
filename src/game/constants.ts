@@ -2,8 +2,8 @@ import { TileType, ResourceType, Direction, GatherTier } from './types';
 
 export const TILE_W = 64;
 export const TILE_H = 32;
-export const MAP_COLS = 120;
-export const MAP_ROWS = 120;
+export const MAP_COLS = 240;
+export const MAP_ROWS = 240;
 
 export const CAMERA_MIN_ZOOM = 0.25;
 export const CAMERA_MAX_ZOOM = 3;
@@ -19,9 +19,14 @@ export const ELEVATION_THRESHOLDS = {
   water:    0.20,
   sand:     0.28,
   grass:    0.55,
-  forest:   0.70,
-  stone:    0.85,
+  forest:   0.70,  // top of the land band (grass/forest); above is stone
+  stone:    0.89,  // raised so fewer tiles become Mountain (was 0.85)
 } as const;
+
+// Forest is scattered across the land band by a separate noise (so it isn't
+// just a ring below the mountains). Higher threshold = sparser forest.
+export const FOREST_NOISE_SCALE = 4;
+export const FOREST_NOISE_THRESHOLD = 0.28;
 
 export const RESOURCE_SPAWN_CHANCE = {
   forest: 0.3,

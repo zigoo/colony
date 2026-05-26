@@ -39,7 +39,7 @@ The codebase is split along a **renderer-agnostic boundary** that is the most im
 One large Zustand store (`devtools` + `persist` middleware) holds three slices: `game` (map, units, buildings, resources, tick), `camera`, and `ui`. Plus an `occupants` index (`"col,row" -> unitId`) maintained alongside `units` for fast tile-occupancy lookups.
 
 - **`tick()` is the simulation step** and by far the largest function. It runs the entire unit AI / resource-transport state machine, building construction, production cycles, food consumption, and population growth. When changing gameplay behavior, you are almost always editing `tick()`.
-- Persistence: only the `game` slice is persisted, under localStorage key **`settlers-v3`**. If you change the shape of persisted state, bump this key and add migration logic in `loadGameState` (which already back-fills missing fields on load).
+- Persistence: only the `game` slice is persisted, under localStorage key **`settlers-v5`**. If you change the shape of persisted state, bump this key and add migration logic in `loadGameState` (which already back-fills missing fields on load).
 - `PLAYER_ID = 'player1'` — resources are keyed per owner; there is currently one player.
 
 ### Tick-based simulation (`src/hooks/useGameLoop.ts`)

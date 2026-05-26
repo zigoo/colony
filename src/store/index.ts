@@ -1686,8 +1686,27 @@ export const useStore = create<Store>()(
         },
       }),
       {
-        name: 'settlers-v3',
-        partialize: (state) => ({ game: state.game }),
+        name: 'settlers-v5',
+        // The tile map (240×240) is far too big for localStorage, so persist
+        // everything except the tiles and regenerate them from the seed on load
+        // (the map is deterministic). Note: per-tile mutations (roads, harvested
+        // resources) are not persisted yet.
+        partialize: (state) => ({
+          game: { ...state.game, map: { ...state.game.map, tiles: {} } },
+        }),
+        merge: (persisted, current) => {
+          const p = persisted as { game?: GameState } | undefined;
+
+          if (!p?.game) return current;
+
+          const seed = p.game.map?.seed ?? current.game.map.seed;
+
+          return {
+            ...current,
+            game: { ...p.game, map: generateMap(seed) },
+            occupants: buildOccupants(p.game.units),
+          };
+        },
       },
     ),
     { name: 'settlers' },

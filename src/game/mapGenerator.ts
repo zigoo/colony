@@ -4,7 +4,7 @@ import type { MapState, Tile } from './types';
 import {
   MAP_COLS, MAP_ROWS,
   ELEVATION_THRESHOLDS, RESOURCE_SPAWN_CHANCE, RESOURCE_AMOUNT,
-  TILE_MOVE_COSTS,
+  TILE_MOVE_COSTS, FOREST_NOISE_SCALE, FOREST_NOISE_THRESHOLD,
 } from './constants';
 
 const mulberry32 = (seed: number) => () => {
@@ -16,11 +16,16 @@ const mulberry32 = (seed: number) => () => {
   return ((t ^ t >>> 14) >>> 0) / 4294967296;
 };
 
-const classifyTile = (elevation: number): TileType => {
+// forestValue is a separate noise field in [-1, 1]; forest is scattered across
+// the whole land band where it exceeds the threshold (decoupled from mountains).
+const classifyTile = (elevation: number, forestValue: number): TileType => {
   if (elevation < ELEVATION_THRESHOLDS.water)  return TileType.Water;
   if (elevation < ELEVATION_THRESHOLDS.sand)   return TileType.Sand;
-  if (elevation < ELEVATION_THRESHOLDS.grass)  return TileType.Grass;
-  if (elevation < ELEVATION_THRESHOLDS.forest) return TileType.Forest;
+
+  if (elevation < ELEVATION_THRESHOLDS.forest) {
+    return forestValue > FOREST_NOISE_THRESHOLD ? TileType.Forest : TileType.Grass;
+  }
+
   if (elevation < ELEVATION_THRESHOLDS.stone)  return TileType.Stone;
 
   return TileType.Mountain;
@@ -65,6 +70,7 @@ export const generateMap = (initialSeed?: number): MapState => {
   const seed = initialSeed ?? Math.floor(Math.random() * 0xffffffff);
   const rng = mulberry32(seed);
   const noise2D = createNoise2D(rng);
+  const forestNoise = createNoise2D(rng);
 
   const tiles: Record<string, Tile> = {};
 
@@ -78,7 +84,8 @@ export const generateMap = (initialSeed?: number): MapState => {
       const octave3 = noise2D(nx * 12, ny * 12) * 0.25;
       const elevation = ((octave1 + octave2 + octave3) / 1.75 + 1) / 2;
 
-      const type = classifyTile(elevation);
+      const forestValue = forestNoise(nx * FOREST_NOISE_SCALE, ny * FOREST_NOISE_SCALE);
+      const type = classifyTile(elevation, forestValue);
       const resource = seedResource(type, rng);
 
       tiles[`${col},${row}`] = { col, row, type, elevation, moveCost: TILE_MOVE_COSTS[type], ...resource };
