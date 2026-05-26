@@ -3,6 +3,8 @@ import { GameCanvas } from './components/GameCanvas';
 import { GameCanvasGL } from './components/GameCanvasGL';
 import { GLDevPanel } from './components/GLDevPanel';
 import { WorldClockIndicator } from './components/WorldClockIndicator';
+import { UnitTooltip } from './components/UnitTooltip';
+import { UnitInfoPanel } from './components/UnitInfoPanel';
 import { HUD } from './components/HUD';
 import { Toolbar } from './components/Toolbar';
 import { Minimap } from './components/Minimap';
@@ -32,6 +34,9 @@ export default function App() {
       </div>
       {glRenderer && <GLDevPanel />}
       {glRenderer && <WorldClockIndicator />}
+      {glRenderer && <SelectionBox />}
+      {glRenderer && <UnitTooltip />}
+      {glRenderer && <UnitInfoPanel />}
       {!glRenderer && (
         <>
           <HUD />

@@ -40,6 +40,13 @@ const clampRow = (r: number) => Math.max(0, Math.min(MAP_ROWS - 1, r));
 export const COL_OFFSET = MAP_COLS / 2;
 export const ROW_OFFSET = MAP_ROWS / 2;
 
+// Base elevation above which a tile counts as "high ground" and gets the
+// mountain-height boost.
+const HILL_BOOST_THRESHOLD = 0.15;
+// Per-vertex luminance jitter applied from noise so flat areas aren't dead flat.
+const COLOR_JITTER = 0.08;
+const TERRAIN_ROUGHNESS = 0.95;
+
 interface TileSample {
   elevation: number;
   roughness: number;
@@ -57,12 +64,60 @@ const sampleTile = (map: MapState, col: number, row: number): TileSample => {
   };
 };
 
+// Deterministic noise shared by the mesh builder and the height sampler so
+// picking/highlights land exactly on the rendered surface.
+const noise2D = createNoise2D(() => 0.42);
+
+const noiseHeight = (gx: number, gz: number): number => {
+  const o1 = noise2D(gx * 0.18, gz * 0.18);
+  const o2 = noise2D(gx * 0.42, gz * 0.42) * 0.5;
+  const o3 = noise2D(gx * 0.9, gz * 0.9) * 0.25;
+
+  return (o1 + o2 + o3) / 1.75;
+};
+
+// The single source of truth for vertex height, used by both the mesh and the
+// picking sampler.
+const heightFromElev = (baseElev: number, rough: number, n: number, p: GLParams): number => {
+  const boosted = baseElev > HILL_BOOST_THRESHOLD ? baseElev * p.mountainScale : baseElev;
+
+  return boosted * p.heightScale + n * rough * p.noiseAmp * p.heightScale;
+};
+
+// Returns terrain height at continuous grid coords (gx,gz) — bilinear over the
+// four surrounding tile centers plus the same noise the mesh uses.
+export const createHeightSampler = (
+  map: MapState,
+  params: GLParams = defaultGLParams,
+): ((gx: number, gz: number) => number) => (gx, gz) => {
+  const fx = gx - 0.5;
+  const fz = gz - 0.5;
+  const c0 = Math.floor(fx);
+  const r0 = Math.floor(fz);
+  const tx = fx - c0;
+  const tz = fz - r0;
+
+  const s00 = sampleTile(map, c0, r0);
+  const s10 = sampleTile(map, c0 + 1, r0);
+  const s01 = sampleTile(map, c0, r0 + 1);
+  const s11 = sampleTile(map, c0 + 1, r0 + 1);
+
+  const w00 = (1 - tx) * (1 - tz);
+  const w10 = tx * (1 - tz);
+  const w01 = (1 - tx) * tz;
+  const w11 = tx * tz;
+
+  const baseElev = s00.elevation * w00 + s10.elevation * w10 + s01.elevation * w01 + s11.elevation * w11;
+  const rough = s00.roughness * w00 + s10.roughness * w10 + s01.roughness * w01 + s11.roughness * w11;
+
+  return heightFromElev(baseElev, rough, noiseHeight(gx, gz), params);
+};
+
 // Builds one continuous heightmapped mesh with smoothly interpolated vertex
 // colors. Tile properties are bilinearly sampled across the four surrounding
 // tile centers, then multi-octave noise breaks up the regular grid.
 export const buildTerrainMesh = (map: MapState, params: GLParams = defaultGLParams): THREE.Mesh => {
-  const { terrainSub: sub, heightScale, mountainScale, noiseAmp } = params;
-  const noise2D = createNoise2D(() => 0.42); // deterministic so reloads match
+  const { terrainSub: sub } = params;
   const vcols = MAP_COLS * sub;
   const vrows = MAP_ROWS * sub;
   const vertsX = vcols + 1;
@@ -70,13 +125,6 @@ export const buildTerrainMesh = (map: MapState, params: GLParams = defaultGLPara
 
   const positions = new Float32Array(vertsX * vertsZ * 3);
   const colors = new Float32Array(vertsX * vertsZ * 3);
-
-  const noiseHeight = (gx: number, gz: number): number => {
-    const o1 = noise2D(gx * 0.18, gz * 0.18);
-    const o2 = noise2D(gx * 0.42, gz * 0.42) * 0.5;
-    const o3 = noise2D(gx * 0.9, gz * 0.9) * 0.25;
-    return (o1 + o2 + o3) / 1.75;
-  };
 
   for (let j = 0; j < vertsZ; j++) {
     for (let i = 0; i < vertsX; i++) {
@@ -105,9 +153,7 @@ export const buildTerrainMesh = (map: MapState, params: GLParams = defaultGLPara
       const rough = s00.roughness * w00 + s10.roughness * w10 + s01.roughness * w01 + s11.roughness * w11;
 
       const n = noiseHeight(gx, gz);
-      // High ground (hills/mountains) gets an extra boost so peaks read tall.
-      const boosted = baseElev > 0.15 ? baseElev * mountainScale : baseElev;
-      const height = boosted * heightScale + n * rough * noiseAmp * heightScale;
+      const height = heightFromElev(baseElev, rough, n, params);
 
       const idx = (j * vertsX + i) * 3;
       positions[idx] = gx - COL_OFFSET;
@@ -118,8 +164,7 @@ export const buildTerrainMesh = (map: MapState, params: GLParams = defaultGLPara
       const cg = s00.color.g * w00 + s10.color.g * w10 + s01.color.g * w01 + s11.color.g * w11;
       const cb = s00.color.b * w00 + s10.color.b * w10 + s01.color.b * w01 + s11.color.b * w11;
 
-      // Subtle per-vertex luminance jitter so flat areas aren't dead flat.
-      const lum = 1 + n * 0.08;
+      const lum = 1 + n * COLOR_JITTER;
       colors[idx] = cr * lum;
       colors[idx + 1] = cg * lum;
       colors[idx + 2] = cb * lum;
@@ -145,7 +190,7 @@ export const buildTerrainMesh = (map: MapState, params: GLParams = defaultGLPara
 
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    roughness: 0.95,
+    roughness: TERRAIN_ROUGHNESS,
     metalness: 0.0,
     flatShading: false,
   });

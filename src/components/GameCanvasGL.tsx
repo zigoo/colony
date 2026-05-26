@@ -1,11 +1,19 @@
 import { useRef, useEffect } from 'react';
-import { useStore } from '../store';
+import { useStore, spawnAtCenter } from '../store';
 import { GLScene } from '../renderer/gl/GLScene';
 import { useGLParams } from '../renderer/gl/glParams';
 import { computeSky } from '../renderer/gl/dayNightCycle';
 import { useWorldClock } from '../renderer/gl/worldClock';
+import { useUnitHover } from '../renderer/gl/unitHover';
+import { MIN_DRAG_DISTANCE, CAMERA_ZOOM_STEP_IN, CAMERA_ZOOM_STEP_OUT } from '../game/constants';
 
 const TICK_MS = 100;
+const MAX_FRAME_DELTA_MS = 200; // clamp so a backgrounded tab doesn't fast-forward ticks
+
+const toNdc = (e: MouseEvent): { x: number; y: number } => ({
+  x: (e.clientX / window.innerWidth) * 2 - 1,
+  y: -(e.clientY / window.innerHeight) * 2 + 1,
+});
 
 export const GameCanvasGL = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -31,32 +39,130 @@ export const GameCanvasGL = () => {
     // Live tuning: re-apply camera/light/terrain params whenever a slider moves.
     const unsubParams = useGLParams.subscribe((p) => glScene.applyParams(p));
 
-    // ── interaction (pan + zoom; tile picking lands in Phase 2) ──
+    // ── interaction (pan + zoom + picking; shift+drag = box select) ──
     let dragging = false;
+    let boxSelecting = false;
+    let hasMoved = false;
     let last = { x: 0, y: 0 };
+    let down = { x: 0, y: 0 };
 
     const onMouseDown = (e: MouseEvent) => {
-      dragging = true;
+      hasMoved = false;
       last = { x: e.clientX, y: e.clientY };
+      down = { x: e.clientX, y: e.clientY };
+
+      if (e.shiftKey) boxSelecting = true;
+      else dragging = true;
     };
     const onMouseMove = (e: MouseEvent) => {
-      if (!dragging) return;
-      glScene.pan(e.clientX - last.x, e.clientY - last.y);
-      last = { x: e.clientX, y: e.clientY };
+      if (boxSelecting) {
+        useStore.getState().setSelectionBox({ x1: down.x, y1: down.y, x2: e.clientX, y2: e.clientY });
+
+        return;
+      }
+
+      if (dragging) {
+        if (Math.abs(e.clientX - down.x) > MIN_DRAG_DISTANCE || Math.abs(e.clientY - down.y) > MIN_DRAG_DISTANCE) {
+          hasMoved = true;
+        }
+
+        if (hasMoved) {
+          glScene.pan(e.clientX - last.x, e.clientY - last.y);
+          last = { x: e.clientX, y: e.clientY };
+        }
+
+        return;
+      }
+
+      const n = toNdc(e);
+      const cell = glScene.pickTile(n.x, n.y);
+      glScene.setHover(cell);
+
+      const st = useStore.getState();
+      const hoveredId = cell ? st.occupants[`${cell.col},${cell.row}`] : undefined;
+      useUnitHover.getState().set(hoveredId ? st.game.units[hoveredId]?.name ?? null : null, e.clientX, e.clientY);
     };
-    const onMouseUp = () => { dragging = false; };
+    const onMouseUp = (e: MouseEvent) => {
+      const store = useStore.getState();
+
+      if (boxSelecting) {
+        const ids = glScene.unitsInScreenBox(store.game.units, down.x, down.y, e.clientX, e.clientY);
+        store.selectUnits(ids);
+        store.setSelectionBox(null);
+        boxSelecting = false;
+
+        return;
+      }
+
+      // A click (no meaningful drag) selects a unit, commands selected units, or
+      // selects an empty tile — mirroring the 2D renderer's interaction.
+      if (dragging && !hasMoved) {
+        const n = toNdc(e);
+        const cell = glScene.pickTile(n.x, n.y);
+
+        if (!cell) {
+          store.selectUnits([]);
+          store.selectTile(null, null);
+        } else {
+          const unitId = store.occupants[`${cell.col},${cell.row}`];
+
+          if (unitId) {
+            store.selectUnits([unitId]);
+          } else if (store.ui.selectedUnitIds.length > 0) {
+            store.ui.selectedUnitIds.forEach((id, i) => store.moveUnitTo(id, cell.col, cell.row, i * 2));
+          } else {
+            store.selectTile(cell.col, cell.row);
+          }
+        }
+      }
+
+      dragging = false;
+    };
+    const onMouseLeave = () => {
+      glScene.setHover(null);
+      useUnitHover.getState().set(null, 0, 0);
+    };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      glScene.zoom(e.deltaY < 0 ? 1.1 : 0.9);
+      glScene.zoom(e.deltaY < 0 ? CAMERA_ZOOM_STEP_IN : CAMERA_ZOOM_STEP_OUT);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        useStore.getState().selectUnits([]);
+        useStore.getState().selectTile(null, null);
+
+        return;
+      }
+
+      // Dev: press 'u' to spawn a settler on the selected tile.
+      if (e.key === 'u' || e.key === 'U') {
+        const { ui } = useStore.getState();
+
+        if (ui.selectedCol !== null && ui.selectedRow !== null) useStore.getState().spawnUnit(ui.selectedCol, ui.selectedRow);
+        else spawnAtCenter();
+      }
     };
     const onResize = () => {
       glScene.resize(window.innerWidth, window.innerHeight);
     };
 
+    // Reflect tile selection (from clicks here or elsewhere) in the highlight.
+    let lastSel = '';
+    const unsubSel = useStore.subscribe((s) => {
+      const { selectedCol, selectedRow } = s.ui;
+      const key = `${selectedCol},${selectedRow}`;
+
+      if (key === lastSel) return;
+      lastSel = key;
+      glScene.setSelected(selectedCol !== null && selectedRow !== null ? { col: selectedCol, row: selectedRow } : null);
+    });
+
     el.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
+    el.addEventListener('mouseleave', onMouseLeave);
     el.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('keydown', onKeyDown);
     window.addEventListener('resize', onResize);
 
     // ── game loop (fixed-timestep tick + render) ──
@@ -65,7 +171,7 @@ export const GameCanvasGL = () => {
     let accumulator = 0;
 
     const loop = (timestamp: number) => {
-      const delta = Math.min(timestamp - lastTime, 200);
+      const delta = Math.min(timestamp - lastTime, MAX_FRAME_DELTA_MS);
       lastTime = timestamp;
       accumulator += delta;
 
@@ -75,9 +181,11 @@ export const GameCanvasGL = () => {
       }
 
       const p = useGLParams.getState();
-      const sky = computeSky(useStore.getState().game.tick, p.dayLengthSec, p.sunIntensity, p.hemiIntensity);
+      const { game } = useStore.getState();
+      const sky = computeSky(game.tick, p.dayLengthSec, p.sunIntensity, p.hemiIntensity);
       glScene.applySky(sky);
       useWorldClock.getState().update(sky);
+      glScene.syncEntities(game.buildings, game.units, new Set(useStore.getState().ui.selectedUnitIds), delta / 1000);
 
       glScene.render();
       rafId = requestAnimationFrame(loop);
@@ -88,10 +196,13 @@ export const GameCanvasGL = () => {
       cancelAnimationFrame(rafId);
       unsubMap();
       unsubParams();
+      unsubSel();
       el.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
+      el.removeEventListener('mouseleave', onMouseLeave);
       el.removeEventListener('wheel', onWheel);
+      window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', onResize);
       glScene.dispose();
     };
