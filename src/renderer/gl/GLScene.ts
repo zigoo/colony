@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { MapState } from '../../game/types';
 import { MAP_COLS, MAP_ROWS } from '../../game/constants';
-import { buildTerrainMesh, createHeightSampler, COL_OFFSET, ROW_OFFSET } from './terrain';
+import { buildTerrainChunks, createHeightSampler, COL_OFFSET, ROW_OFFSET } from './terrain';
 import { defaultGLParams, terrainSignature } from './glParams';
 import type { GLParams } from './glParams';
 import type { SkyState } from './dayNightCycle';
@@ -84,7 +84,7 @@ export class GLScene {
   private readonly forest: GLForest;
   private heightSampler: ((gx: number, gz: number) => number) | null = null;
   private selectedCell: GridCell | null = null;
-  private terrain: THREE.Mesh | null = null;
+  private terrainMeshes: THREE.Mesh[] = [];
   private params: GLParams = { ...defaultGLParams };
   private map: MapState | null = null;
   private terrainSig = '';
@@ -288,10 +288,7 @@ export class GLScene {
   }
 
   dispose(): void {
-    if (this.terrain) {
-      this.terrain.geometry.dispose();
-      (this.terrain.material as THREE.Material).dispose();
-    }
+    this.disposeTerrain();
     this.water.geometry.dispose();
     (this.water.material as THREE.Material).dispose();
     this.hoverMesh.geometry.dispose();
@@ -318,16 +315,24 @@ export class GLScene {
     mesh.visible = true;
   }
 
+  private disposeTerrain(): void {
+    if (this.terrainMeshes.length === 0) return;
+
+    const material = this.terrainMeshes[0].material as THREE.Material;
+    for (const mesh of this.terrainMeshes) {
+      this.scene.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    material.dispose(); // shared across all chunks
+    this.terrainMeshes = [];
+  }
+
   private rebuildTerrain(): void {
     if (!this.map) return;
 
-    if (this.terrain) {
-      this.scene.remove(this.terrain);
-      this.terrain.geometry.dispose();
-      (this.terrain.material as THREE.Material).dispose();
-    }
-    this.terrain = buildTerrainMesh(this.map, this.params);
-    this.scene.add(this.terrain);
+    this.disposeTerrain();
+    this.terrainMeshes = buildTerrainChunks(this.map, this.params);
+    for (const mesh of this.terrainMeshes) this.scene.add(mesh);
     this.terrainSig = terrainSignature(this.params);
     this.heightSampler = createHeightSampler(this.map, this.params);
 

@@ -7,9 +7,10 @@ import type { TreeKey } from './glModels';
 
 type HeightAt = (col: number, row: number) => number;
 
-// Global cap on tree instances (sampled evenly across forest tiles). With
-// per-chunk culling only on-screen chunks are drawn, so this can be generous.
-const MAX_TREES = 3000;
+// Fraction of forest tiles that get a tree (deterministic per tile). Uniform
+// density regardless of map size; per-chunk culling keeps only on-screen trees
+// in the draw cost.
+const FOREST_DENSITY = 0.55;
 const SCALE_JITTER = 0.28; // ± fraction of base scale
 // Trees are grouped into square chunks of this many tiles so off-screen chunks
 // are frustum-culled as whole InstancedMeshes.
@@ -40,10 +41,6 @@ export class GLForest {
 
     if (!isTreesLoaded()) return;
 
-    const forest = Object.values(map.tiles).filter((t) => t.type === TileType.Forest);
-    const stride = Math.max(1, Math.ceil(forest.length / MAX_TREES));
-    const chosen = forest.filter((_, i) => i % stride === 0);
-
     // Bucket instance matrices by "chunkX,chunkY,variant".
     const buckets = new Map<string, THREE.Matrix4[]>();
     const q = new THREE.Quaternion();
@@ -51,8 +48,14 @@ export class GLForest {
     const pos = new THREE.Vector3();
     const scl = new THREE.Vector3();
 
-    for (const t of chosen) {
+    for (const t of Object.values(map.tiles)) {
+      if (t.type !== TileType.Forest) continue;
+
       const h = hash(t.col, t.row);
+
+      // Density gate (high bits, decorrelated from variant/jitter/rotation).
+      if (((h >>> 13) % 1000) / 1000 >= FOREST_DENSITY) continue;
+
       const key = TREE_KEYS[h % TREE_KEYS.length];
       const tmpl = getTreeTemplate(key)!;
       const jitter = 1 + (((h >>> 3) % 1000) / 1000 - 0.5) * 2 * SCALE_JITTER;
