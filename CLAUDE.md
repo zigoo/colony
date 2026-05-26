@@ -21,8 +21,9 @@ Do **not** commit the `src/img/` directory (source art scratch space).
 - Prefer named exports.
 - Use `className`, never `class`.
 - Keep components small and composable.
+- Do not use magic string or magic numbers - put everything into constants
 - Follow existing project patterns before introducing new abstractions.
-- 
+
 ## Big picture
 
 This is "Settlers", a browser RTS/colony game: an isometric tile map with units that gather resources, transport them, and construct/operate buildings. There is no backend — all state lives in a single Zustand store and persists to `localStorage`.
