@@ -47,22 +47,40 @@ const HILL_BOOST_THRESHOLD = 0.15;
 const COLOR_JITTER = 0.08;
 const TERRAIN_ROUGHNESS = 0.95;
 
-interface TileSample {
-  elevation: number;
-  roughness: number;
-  color: THREE.Color;
-}
+// Tile properties indexed by a small integer type id, plus a precomputed grid of
+// those ids — so per-vertex sampling does plain array reads (no string keys, no
+// object allocation), which keeps chunk building cheap.
+const TYPE_ORDER: TileType[] = [
+  TileType.Water, TileType.Sand, TileType.Grass, TileType.Forest, TileType.Stone, TileType.Mountain,
+];
+const TYPE_INDEX = Object.fromEntries(TYPE_ORDER.map((t, i) => [t, i])) as Record<TileType, number>;
+const GRASS_IDX = TYPE_INDEX[TileType.Grass];
 
-const sampleTile = (map: MapState, col: number, row: number): TileSample => {
-  const tile = map.tiles[`${clampCol(col)},${clampRow(row)}`];
-  const type = tile?.type ?? TileType.Grass;
+const ELEV = TYPE_ORDER.map((t) => TILE_ELEVATION[t]);
+const ROUGH = TYPE_ORDER.map((t) => TILE_ROUGHNESS[t]);
+const COL_R = TYPE_ORDER.map((t) => tileColorVec[t].r);
+const COL_G = TYPE_ORDER.map((t) => tileColorVec[t].g);
+const COL_B = TYPE_ORDER.map((t) => tileColorVec[t].b);
 
-  return {
-    elevation: TILE_ELEVATION[type],
-    roughness: TILE_ROUGHNESS[type],
-    color: tileColorVec[type],
-  };
+let typeGrid: Int8Array | null = null;
+let gridForMap: MapState | null = null;
+
+const ensureTypeGrid = (map: MapState): void => {
+  if (gridForMap === map && typeGrid) return;
+
+  const grid = new Int8Array(MAP_COLS * MAP_ROWS);
+  for (let row = 0; row < MAP_ROWS; row++) {
+    for (let col = 0; col < MAP_COLS; col++) {
+      const tile = map.tiles[`${col},${row}`];
+      grid[row * MAP_COLS + col] = tile ? TYPE_INDEX[tile.type] : GRASS_IDX;
+    }
+  }
+  typeGrid = grid;
+  gridForMap = map;
 };
+
+const typeIdxAt = (col: number, row: number): number =>
+  typeGrid![clampRow(row) * MAP_COLS + clampCol(col)];
 
 // Deterministic noise shared by the mesh builder and the height sampler so
 // picking/highlights land exactly on the rendered surface.
@@ -86,6 +104,8 @@ const heightFromElev = (baseElev: number, rough: number, n: number, p: GLParams)
 // bilinear over the four surrounding tile centers plus multi-octave noise. Used
 // by the mesh builder, the picking sampler, and chunk normals.
 const terrainHeight = (map: MapState, gx: number, gz: number, params: GLParams): number => {
+  ensureTypeGrid(map);
+
   const fx = gx - 0.5;
   const fz = gz - 0.5;
   const c0 = Math.floor(fx);
@@ -93,18 +113,18 @@ const terrainHeight = (map: MapState, gx: number, gz: number, params: GLParams):
   const tx = fx - c0;
   const tz = fz - r0;
 
-  const s00 = sampleTile(map, c0, r0);
-  const s10 = sampleTile(map, c0 + 1, r0);
-  const s01 = sampleTile(map, c0, r0 + 1);
-  const s11 = sampleTile(map, c0 + 1, r0 + 1);
+  const i00 = typeIdxAt(c0, r0);
+  const i10 = typeIdxAt(c0 + 1, r0);
+  const i01 = typeIdxAt(c0, r0 + 1);
+  const i11 = typeIdxAt(c0 + 1, r0 + 1);
 
   const w00 = (1 - tx) * (1 - tz);
   const w10 = tx * (1 - tz);
   const w01 = (1 - tx) * tz;
   const w11 = tx * tz;
 
-  const baseElev = s00.elevation * w00 + s10.elevation * w10 + s01.elevation * w01 + s11.elevation * w11;
-  const rough = s00.roughness * w00 + s10.roughness * w10 + s01.roughness * w01 + s11.roughness * w11;
+  const baseElev = ELEV[i00] * w00 + ELEV[i10] * w10 + ELEV[i01] * w01 + ELEV[i11] * w11;
+  const rough = ROUGH[i00] * w00 + ROUGH[i10] * w10 + ROUGH[i01] * w01 + ROUGH[i11] * w11;
 
   return heightFromElev(baseElev, rough, noiseHeight(gx, gz), params);
 };
@@ -116,6 +136,8 @@ export const createHeightSampler = (
 
 // Smoothly interpolated terrain color at (gx,gz), written into `out` as [r,g,b].
 const terrainColor = (map: MapState, gx: number, gz: number, out: [number, number, number]): void => {
+  ensureTypeGrid(map);
+
   const fx = gx - 0.5;
   const fz = gz - 0.5;
   const c0 = Math.floor(fx);
@@ -123,10 +145,10 @@ const terrainColor = (map: MapState, gx: number, gz: number, out: [number, numbe
   const tx = fx - c0;
   const tz = fz - r0;
 
-  const s00 = sampleTile(map, c0, r0);
-  const s10 = sampleTile(map, c0 + 1, r0);
-  const s01 = sampleTile(map, c0, r0 + 1);
-  const s11 = sampleTile(map, c0 + 1, r0 + 1);
+  const i00 = typeIdxAt(c0, r0);
+  const i10 = typeIdxAt(c0 + 1, r0);
+  const i01 = typeIdxAt(c0, r0 + 1);
+  const i11 = typeIdxAt(c0 + 1, r0 + 1);
 
   const w00 = (1 - tx) * (1 - tz);
   const w10 = tx * (1 - tz);
@@ -134,22 +156,32 @@ const terrainColor = (map: MapState, gx: number, gz: number, out: [number, numbe
   const w11 = tx * tz;
 
   const lum = 1 + noiseHeight(gx, gz) * COLOR_JITTER;
-  out[0] = (s00.color.r * w00 + s10.color.r * w10 + s01.color.r * w01 + s11.color.r * w11) * lum;
-  out[1] = (s00.color.g * w00 + s10.color.g * w10 + s01.color.g * w01 + s11.color.g * w11) * lum;
-  out[2] = (s00.color.b * w00 + s10.color.b * w10 + s01.color.b * w01 + s11.color.b * w11) * lum;
+  out[0] = (COL_R[i00] * w00 + COL_R[i10] * w10 + COL_R[i01] * w01 + COL_R[i11] * w11) * lum;
+  out[1] = (COL_G[i00] * w00 + COL_G[i10] * w10 + COL_G[i01] * w01 + COL_G[i11] * w11) * lum;
+  out[2] = (COL_B[i00] * w00 + COL_B[i10] * w10 + COL_B[i01] * w01 + COL_B[i11] * w11) * lum;
 };
 
-// Visual chunk size in gameplay tiles. The terrain is split into these so
-// off-screen chunks are frustum-culled instead of always drawing the whole map.
-const TERRAIN_CHUNK_TILES = 40;
+// Visual chunk size in gameplay tiles — the unit of terrain streaming/culling.
+export const TERRAIN_CHUNK_TILES = 40;
 
-const buildChunkMesh = (
+export const createTerrainMaterial = (): THREE.MeshStandardMaterial =>
+  new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: TERRAIN_ROUGHNESS,
+    metalness: 0.0,
+    flatShading: false,
+  });
+
+// Builds one terrain chunk covering tile range [c0,c1) × [r0,r1). All chunks
+// sample the same global height/color field (with a bordered height grid for
+// analytic normals) so they tile seamlessly with no lighting cracks.
+export const buildTerrainChunk = (
   map: MapState,
   params: GLParams,
   material: THREE.Material,
   c0: number, c1: number, r0: number, r1: number,
+  sub: number = params.terrainSub, // grid density (LOD); the height field itself is sub-independent
 ): THREE.Mesh => {
-  const sub = params.terrainSub;
   const vcols = (c1 - c0) * sub;
   const vrows = (r1 - r0) * sub;
   const vx = vcols + 1;
@@ -225,27 +257,4 @@ const buildChunkMesh = (
   mesh.receiveShadow = true;
 
   return mesh;
-};
-
-// Builds the terrain as a set of per-region chunk meshes (sharing one material)
-// so off-screen chunks are frustum-culled. Seamless across chunks because all
-// chunks sample the same global height/color field.
-export const buildTerrainChunks = (map: MapState, params: GLParams = defaultGLParams): THREE.Mesh[] => {
-  const material = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: TERRAIN_ROUGHNESS,
-    metalness: 0.0,
-    flatShading: false,
-  });
-
-  const meshes: THREE.Mesh[] = [];
-  for (let r0 = 0; r0 < MAP_ROWS; r0 += TERRAIN_CHUNK_TILES) {
-    for (let c0 = 0; c0 < MAP_COLS; c0 += TERRAIN_CHUNK_TILES) {
-      const c1 = Math.min(MAP_COLS, c0 + TERRAIN_CHUNK_TILES);
-      const r1 = Math.min(MAP_ROWS, r0 + TERRAIN_CHUNK_TILES);
-      meshes.push(buildChunkMesh(map, params, material, c0, c1, r0, r1));
-    }
-  }
-
-  return meshes;
 };

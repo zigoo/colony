@@ -2,8 +2,8 @@ import { TileType, ResourceType, Direction, GatherTier } from './types';
 
 export const TILE_W = 64;
 export const TILE_H = 32;
-export const MAP_COLS = 240;
-export const MAP_ROWS = 240;
+export const MAP_COLS = 840;
+export const MAP_ROWS = 840;
 
 export const CAMERA_MIN_ZOOM = 0.25;
 export const CAMERA_MAX_ZOOM = 3;

@@ -33,7 +33,7 @@ export const defaultGLParams: GLParams = {
   sunIntensity: 3.0,
   hemiIntensity: 1.0,
   dayLengthSec: 800,
-  terrainSub: 6,
+  terrainSub: 5,
   heightScale: 2.7,
   mountainScale: 4.5,
   noiseAmp: 0.6,

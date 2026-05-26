@@ -1,13 +1,13 @@
 import * as THREE from 'three';
 import type { MapState } from '../../game/types';
 import { MAP_COLS, MAP_ROWS } from '../../game/constants';
-import { buildTerrainChunks, createHeightSampler, COL_OFFSET, ROW_OFFSET } from './terrain';
+import { createHeightSampler, COL_OFFSET, ROW_OFFSET } from './terrain';
 import { defaultGLParams, terrainSignature } from './glParams';
 import type { GLParams } from './glParams';
 import type { SkyState } from './dayNightCycle';
 import { GLEntities } from './GLEntities';
-import { GLForest } from './GLForest';
-import { treeWind, isTreesLoaded } from './glModels';
+import { GLWorld } from './GLWorld';
+import { treeWind } from './glModels';
 import type { Building, Unit } from '../../game/types';
 
 export interface GridCell { col: number; row: number; }
@@ -15,8 +15,12 @@ export interface GridCell { col: number; row: number; }
 const CAMERA_DISTANCE = 600;
 const CAMERA_NEAR = 0.1;
 const CAMERA_FAR = 3000;
-const MIN_ZOOM = 0.3;
+const MIN_ZOOM = 0.18; // lower = can zoom further out
 const MAX_ZOOM = 6;
+// Below this zoom (zoomed far out) trees are tiny dots, so hide them — the
+// forest still reads from the green terrain underneath. Keeps the worst-case
+// (whole visible window full of trees) cheap.
+const TREE_HIDE_ZOOM = 0.5;
 const PAN_SPEED = 1.26; // 180% of the previous feel
 const MAX_PIXEL_RATIO = 2;
 
@@ -81,10 +85,12 @@ export class GLScene {
   private readonly selectMesh: THREE.Mesh;
   private readonly raycaster = new THREE.Raycaster();
   private readonly entities: GLEntities;
-  private readonly forest: GLForest;
+  private readonly world: GLWorld;
   private heightSampler: ((gx: number, gz: number) => number) | null = null;
   private selectedCell: GridCell | null = null;
-  private terrainMeshes: THREE.Mesh[] = [];
+  treesVisible = true;
+  drawCalls = 0;
+  triangles = 0;
   private params: GLParams = { ...defaultGLParams };
   private map: MapState | null = null;
   private terrainSig = '';
@@ -140,7 +146,7 @@ export class GLScene {
     this.scene.add(this.selectMesh);
 
     this.entities = new GLEntities(this.scene, (col, row) => this.heightAt(col, row));
-    this.forest = new GLForest(this.scene);
+    this.world = new GLWorld(this.scene);
 
     this.applyParams(this.params);
   }
@@ -222,6 +228,10 @@ export class GLScene {
     return this.heightSampler ? this.heightSampler(col + 0.5, row + 0.5) : 0;
   }
 
+  get treeCount(): number {
+    return this.world.treeCount;
+  }
+
   // Unit ids whose projected screen position falls inside the pixel box.
   unitsInScreenBox(units: Record<string, Unit>, x1: number, y1: number, x2: number, y2: number): string[] {
     const minX = Math.min(x1, x2);
@@ -278,17 +288,27 @@ export class GLScene {
   }
 
   render(): void {
-    // Build the forest once the tree models finish loading (async after setMap).
-    if (this.map && !this.forest.isBuilt && isTreesLoaded()) {
-      this.forest.build(this.map, (col, row) => this.heightAt(col, row));
-    }
+    // Stream terrain + forest chunks around the camera, sized to the visible
+    // ground footprint (foreshortened by the camera tilt).
+    const halfH = this.params.viewSize / 2 / this.camera.zoom;
+    const halfW = halfH * (this.width / this.height);
+    const groundDepth = halfH / Math.sin(THREE.MathUtils.degToRad(this.params.camElevationDeg));
+    const viewRadius = Math.hypot(halfW, groundDepth);
+
+    // Zoom-LOD: hide trees when zoomed far out (they'd be sub-pixel anyway).
+    this.treesVisible = this.camera.zoom >= TREE_HIDE_ZOOM;
+    this.world.setForestVisible(this.treesVisible);
+    this.world.update(this.target.x, this.target.z, viewRadius, this.camera);
 
     treeWind.value = performance.now() / 1000;
     this.renderer.render(this.scene, this.camera);
+
+    this.drawCalls = this.renderer.info.render.calls;
+    this.triangles = this.renderer.info.render.triangles;
   }
 
   dispose(): void {
-    this.disposeTerrain();
+    this.world.dispose();
     this.water.geometry.dispose();
     (this.water.material as THREE.Material).dispose();
     this.hoverMesh.geometry.dispose();
@@ -296,7 +316,6 @@ export class GLScene {
     this.selectMesh.geometry.dispose();
     (this.selectMesh.material as THREE.Material).dispose();
     this.entities.dispose();
-    this.forest.dispose();
     this.renderer.dispose();
   }
 
@@ -315,32 +334,16 @@ export class GLScene {
     mesh.visible = true;
   }
 
-  private disposeTerrain(): void {
-    if (this.terrainMeshes.length === 0) return;
-
-    const material = this.terrainMeshes[0].material as THREE.Material;
-    for (const mesh of this.terrainMeshes) {
-      this.scene.remove(mesh);
-      mesh.geometry.dispose();
-    }
-    material.dispose(); // shared across all chunks
-    this.terrainMeshes = [];
-  }
-
   private rebuildTerrain(): void {
     if (!this.map) return;
 
-    this.disposeTerrain();
-    this.terrainMeshes = buildTerrainChunks(this.map, this.params);
-    for (const mesh of this.terrainMeshes) this.scene.add(mesh);
     this.terrainSig = terrainSignature(this.params);
     this.heightSampler = createHeightSampler(this.map, this.params);
+    // The streamer rebuilds terrain + forest chunks around the camera.
+    this.world.reset(this.map, this.params);
 
     // Re-seat the selection highlight on the new surface.
     this.placeTile(this.selectMesh, this.selectedCell);
-
-    // Trees sit on the terrain, so rebuild them too (no-op until models load).
-    this.forest.build(this.map, (col, row) => this.heightAt(col, row));
   }
 
   private positionCamera(): void {
