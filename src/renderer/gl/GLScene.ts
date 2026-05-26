@@ -6,6 +6,8 @@ import { defaultGLParams, terrainSignature } from './glParams';
 import type { GLParams } from './glParams';
 import type { SkyState } from './dayNightCycle';
 import { GLEntities } from './GLEntities';
+import { GLForest } from './GLForest';
+import { treeWind, isTreesLoaded } from './glModels';
 import type { Building, Unit } from '../../game/types';
 
 export interface GridCell { col: number; row: number; }
@@ -79,6 +81,7 @@ export class GLScene {
   private readonly selectMesh: THREE.Mesh;
   private readonly raycaster = new THREE.Raycaster();
   private readonly entities: GLEntities;
+  private readonly forest: GLForest;
   private heightSampler: ((gx: number, gz: number) => number) | null = null;
   private selectedCell: GridCell | null = null;
   private terrain: THREE.Mesh | null = null;
@@ -137,6 +140,7 @@ export class GLScene {
     this.scene.add(this.selectMesh);
 
     this.entities = new GLEntities(this.scene, (col, row) => this.heightAt(col, row));
+    this.forest = new GLForest(this.scene);
 
     this.applyParams(this.params);
   }
@@ -274,6 +278,12 @@ export class GLScene {
   }
 
   render(): void {
+    // Build the forest once the tree models finish loading (async after setMap).
+    if (this.map && !this.forest.isBuilt && isTreesLoaded()) {
+      this.forest.build(this.map, (col, row) => this.heightAt(col, row));
+    }
+
+    treeWind.value = performance.now() / 1000;
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -289,6 +299,7 @@ export class GLScene {
     this.selectMesh.geometry.dispose();
     (this.selectMesh.material as THREE.Material).dispose();
     this.entities.dispose();
+    this.forest.dispose();
     this.renderer.dispose();
   }
 
@@ -322,6 +333,9 @@ export class GLScene {
 
     // Re-seat the selection highlight on the new surface.
     this.placeTile(this.selectMesh, this.selectedCell);
+
+    // Trees sit on the terrain, so rebuild them too (no-op until models load).
+    this.forest.build(this.map, (col, row) => this.heightAt(col, row));
   }
 
   private positionCamera(): void {
