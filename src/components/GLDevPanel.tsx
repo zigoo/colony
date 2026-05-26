@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useGLParams } from '../renderer/gl/glParams';
 import type { GLParams } from '../renderer/gl/glParams';
+import { useStore } from '../store';
 
 interface SliderDef {
   key: keyof GLParams;
@@ -71,6 +72,7 @@ const btn: React.CSSProperties = {
 
 export const GLDevPanel = () => {
   const params = useGLParams();
+  const generateNewMap = useStore(s => s.generateNewMap);
   const [open, setOpen] = useState(false);
 
   return (
@@ -79,7 +81,10 @@ export const GLDevPanel = () => {
         <strong style={{ color: '#fff', cursor: 'pointer' }} onClick={() => setOpen(o => !o)}>
           {open ? '▾' : '▸'} WebGL tuning
         </strong>
-        {open && <button onClick={params.reset} style={btn}>reset</button>}
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button onClick={() => generateNewMap()} style={btn}>new map</button>
+          {open && <button onClick={params.reset} style={btn}>reset</button>}
+        </div>
       </div>
 
       {open && SLIDERS.map(({ group, items }) => (
