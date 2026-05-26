@@ -6,6 +6,7 @@ import { WorldClockIndicator } from './components/WorldClockIndicator';
 import { ZoomButtons } from './components/ZoomButtons';
 import { UnitTooltip } from './components/UnitTooltip';
 import { UnitInfoPanel } from './components/UnitInfoPanel';
+import { FpsIndicator } from './components/FpsIndicator';
 import { HUD } from './components/HUD';
 import { Toolbar } from './components/Toolbar';
 import { Minimap } from './components/Minimap';
@@ -43,6 +44,7 @@ export default function App() {
       {glRenderer && <SelectionBox />}
       {glRenderer && <UnitTooltip />}
       {glRenderer && <UnitInfoPanel />}
+      {glRenderer && <FpsIndicator />}
       {!glRenderer && (
         <>
           <HUD />

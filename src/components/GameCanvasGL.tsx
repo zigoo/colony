@@ -6,10 +6,12 @@ import { computeSky } from '../renderer/gl/dayNightCycle';
 import { useWorldClock } from '../renderer/gl/worldClock';
 import { useUnitHover } from '../renderer/gl/unitHover';
 import { registerZoom } from '../renderer/gl/glControls';
+import { useFps } from '../renderer/gl/fps';
 import { MIN_DRAG_DISTANCE, CAMERA_ZOOM_STEP_IN, CAMERA_ZOOM_STEP_OUT } from '../game/constants';
 
 const TICK_MS = 100;
 const MAX_FRAME_DELTA_MS = 200; // clamp so a backgrounded tab doesn't fast-forward ticks
+const FPS_UPDATE_MS = 500;      // how often the on-screen FPS readout refreshes
 const EDGE_PAN_MARGIN = 28;     // px from a screen edge that triggers edge-scroll
 const EDGE_PAN_SPEED = 14;      // equivalent drag pixels/frame at the very edge
 
@@ -190,11 +192,22 @@ export const GameCanvasGL = () => {
     let rafId = 0;
     let lastTime = 0;
     let accumulator = 0;
+    let fpsFrames = 0;
+    let fpsElapsed = 0;
 
     const loop = (timestamp: number) => {
       const delta = Math.min(timestamp - lastTime, MAX_FRAME_DELTA_MS);
       lastTime = timestamp;
       accumulator += delta;
+
+      fpsFrames++;
+      fpsElapsed += delta;
+
+      if (fpsElapsed >= FPS_UPDATE_MS) {
+        useFps.getState().set(Math.round((fpsFrames * 1000) / fpsElapsed));
+        fpsFrames = 0;
+        fpsElapsed = 0;
+      }
 
       while (accumulator >= TICK_MS) {
         useStore.getState().tick();
