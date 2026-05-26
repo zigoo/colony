@@ -5,6 +5,8 @@ import { useStore } from '../store';
 import { preloadSprites } from '../renderer/sprites/SpriteLoader';
 import { preloadBuildingSprites } from '../renderer/sprites/BuildingLoader';
 import { preloadGrassTextures } from '../renderer/grassLoader';
+import { preloadSandTexture } from '../renderer/sandLoader';
+import { preloadWaterTexture } from '../renderer/waterLoader';
 import { initRoadGen } from '../renderer/roadGen';
 import { preloadTreeSprites } from '../renderer/treeLoader';
 import { preloadStoneSprites } from '../renderer/stoneLoader';
@@ -20,6 +22,8 @@ export const GameCanvas = () => {
     el.height = window.innerHeight;
     setScreenSize(window.innerWidth, window.innerHeight);
     preloadGrassTextures();
+    preloadSandTexture();
+    preloadWaterTexture();
     preloadSprites();
     preloadBuildingSprites();
     preloadTreeSprites();

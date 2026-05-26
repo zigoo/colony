@@ -22,7 +22,7 @@ export const render = (
   ctx.scale(zoom, zoom);
   ctx.translate(-camX, -camY);
 
-  renderTiles(ctx, state.map, camera);
+  renderTiles(ctx, state.map, camera, timestamp);
   renderResources(ctx, state.map, camera);
   renderBuildings(ctx, state.buildings, timestamp, camera);
   renderSelection(ctx, ui.selectedCol, ui.selectedRow, camera);
