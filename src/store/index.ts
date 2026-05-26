@@ -3,8 +3,8 @@ import { persist, devtools } from 'zustand/middleware';
 import { generateMap } from '../game/mapGenerator';
 import { ResourceType, UnitType, UnitState, Direction, BuildingType, TileType, GatherTier } from '../game/types';
 import type { GameState, CameraState, UIState, Unit, Tile, Building } from '../game/types';
-import { canPlaceBuilding, getWorkerCapacity, BUILDING_PRODUCTION, BUILDING_CONSTRUCTION_MATERIALS, CONSTRUCTION_TICKS } from '../game/buildingConfig';
-import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM, UNIT_MOVE_TICKS, MAP_COLS, MAP_ROWS, GATHER_TIER_CONFIG, DEPOSIT_TICKS, STOREHOUSE_MAX_ITEMS, RESOURCE_REGROW_TICKS, RESOURCE_REGROW_AMOUNT, FOOD_CONSUMPTION_INTERVAL, SETTLEMENT_SPAWN_INTERVAL, SETTLEMENT_SPAWN_FOOD_COST, CONSTRUCTION_MAX_WORKERS } from '../game/constants';
+import { canPlaceBuilding, getWorkerCapacity, BUILDING_PRODUCTION, BUILDING_CONSTRUCTION_MATERIALS, CONSTRUCTION_TICKS, getFootprintTiles, BUILDING_UPGRADE_COST, BUILDING_LEVEL_CONFIG } from '../game/buildingConfig';
+import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM, UNIT_MOVE_TICKS, MAP_COLS, MAP_ROWS, GATHER_TIER_CONFIG, DEPOSIT_TICKS, STOREHOUSE_MAX_ITEMS, STOREHOUSE_CAPACITY_BY_LEVEL, RESOURCE_REGROW_TICKS, RESOURCE_REGROW_AMOUNT, FOOD_CONSUMPTION_INTERVAL, SETTLEMENT_SPAWN_INTERVAL, SETTLEMENT_SPAWN_FOOD_COST, CONSTRUCTION_MAX_WORKERS } from '../game/constants';
 import { createCamera } from '../renderer/Camera';
 import { findPath } from '../game/pathfinding';
 import { getDirection } from '../game/directionUtils';
@@ -42,6 +42,7 @@ interface Store {
   dismissWorker: (buildingId: string) => void;
   placeBuilding: (type: BuildingType, col: number, row: number) => void;
   placeRoadPath: (positions: Array<{ col: number; row: number }>) => void;
+  upgradeBuilding: (buildingId: string) => void;
   tick: () => void;
   rebuildOccupants: () => void;
 }
@@ -55,6 +56,45 @@ const effectiveCapacity = (b: Building): number => {
 
 const storehouseTotal = (b: Building): number =>
   Object.values(b.inventory).reduce((s, v) => s + (v ?? 0), 0);
+
+const storehouseCapacity = (b: Building): number =>
+  STOREHOUSE_CAPACITY_BY_LEVEL[(b.level ?? 1) - 1] ?? STOREHOUSE_MAX_ITEMS;
+
+const buildingBlockedSet = (buildings: Record<string, Building>): Set<string> => {
+  const blocked = new Set<string>();
+
+  for (const b of Object.values(buildings)) {
+    for (const { col, row } of getFootprintTiles(b.type, b.col, b.row)) {
+      blocked.add(`${col},${row}`);
+    }
+  }
+
+  return blocked;
+};
+
+// Mutates the passed `buildings` record by replacing drained storehouses with
+// fresh objects (new identity, so selectors detect the change). Caller must own
+// the record (a shallow copy of state) and set buildingsChanged = true.
+const drainFromStorehouses = (
+  buildings: Record<string, Building>,
+  res: ResourceType,
+  amount: number,
+): number => {
+  let remaining = amount;
+
+  for (const bid of Object.keys(buildings)) {
+    const sh = buildings[bid];
+    if (sh.type !== BuildingType.Storehouse) continue;
+    const have = sh.inventory[res] ?? 0;
+    if (have <= 0) continue;
+    const take = Math.min(have, remaining);
+    buildings[bid] = { ...sh, inventory: { ...sh.inventory, [res]: have - take } };
+    remaining -= take;
+    if (remaining <= 0) break;
+  }
+
+  return amount - remaining;
+};
 
 // Prefers non-full storehouses; falls back to nearest full one if all are full.
 const findNearestStorehouse = (
@@ -71,7 +111,7 @@ const findNearestStorehouse = (
     if (b.type !== BuildingType.Storehouse) continue;
     const dist = Math.abs(b.col - col) + Math.abs(b.row - row);
 
-    if (storehouseTotal(b) < STOREHOUSE_MAX_ITEMS) {
+    if (storehouseTotal(b) < storehouseCapacity(b)) {
       if (dist < bestDist) { bestDist = dist; best = b; }
     } else {
       if (dist < fallbackDist) { fallbackDist = dist; fallback = b; }
@@ -332,7 +372,7 @@ export const useStore = create<Store>()(
           const unit = game.units[id];
           if (!unit) return;
 
-          const path = findPath(game.map, unit.col, unit.row, targetCol, targetRow);
+          const path = findPath(game.map, unit.col, unit.row, targetCol, targetRow, buildingBlockedSet(game.buildings));
           if (path.length === 0) return;
 
           set((state) => ({
@@ -435,7 +475,7 @@ export const useStore = create<Store>()(
               continue;
             }
 
-            const path = findPath(game.map, unit.col, unit.row, bestTile.col, bestTile.row);
+            const path = findPath(game.map, unit.col, unit.row, bestTile.col, bestTile.row, buildingBlockedSet(game.buildings));
             if (path.length === 0) continue;
 
             patches[id] = {
@@ -487,7 +527,7 @@ export const useStore = create<Store>()(
 
               if (!unit) continue;
 
-              const path = findPath(state.game.map, unit.col, unit.row, building.col, building.row);
+              const path = findPath(state.game.map, unit.col, unit.row, building.col, building.row, buildingBlockedSet(state.game.buildings));
 
               if (path.length === 0) continue;
 
@@ -643,6 +683,49 @@ export const useStore = create<Store>()(
           }), false, 'placeBuilding');
         },
 
+        upgradeBuilding: (buildingId) => {
+          set((state) => {
+            const building = state.game.buildings[buildingId];
+
+            if (!building) return state;
+
+            const levelConfigs = BUILDING_LEVEL_CONFIG[building.type];
+
+            if (!levelConfigs) return state;
+
+            const nextLevel = (building.level ?? 1) + 1;
+
+            if (nextLevel > levelConfigs.length) return state;
+
+            const costMap = BUILDING_UPGRADE_COST[building.type]?.[nextLevel];
+
+            if (!costMap) return state;
+
+            for (const [res, needed] of Object.entries(costMap) as [ResourceType, number][]) {
+              if ((building.inventory[res] ?? 0) < needed) return state;
+            }
+
+            const newInv = { ...building.inventory };
+            const newResources = { ...state.game.resources };
+
+            for (const [res, needed] of Object.entries(costMap) as [ResourceType, number][]) {
+              newInv[res as ResourceType] = (newInv[res as ResourceType] ?? 0) - needed;
+              newResources[PLAYER_ID] = {
+                ...newResources[PLAYER_ID],
+                [res]: Math.max(0, (newResources[PLAYER_ID]?.[res as HarvestableResource] ?? 0) - needed),
+              };
+            }
+
+            return {
+              game: {
+                ...state.game,
+                buildings: { ...state.game.buildings, [buildingId]: { ...building, level: nextLevel, inventory: newInv } },
+                resources: newResources,
+              },
+            };
+          }, false, 'upgradeBuilding');
+        },
+
         tick: () => {
           set((state) => {
             const newTick = state.game.tick + 1;
@@ -666,6 +749,7 @@ export const useStore = create<Store>()(
             const units = { ...state.game.units };
             const occupants = { ...state.occupants };
             const newBuildings = { ...state.game.buildings };
+            const blocked = buildingBlockedSet(state.game.buildings);
             let mapChanged = Object.keys(newTiles).length > 0;
             let resourcesChanged = false;
             let buildingsChanged = false;
@@ -686,17 +770,17 @@ export const useStore = create<Store>()(
                   });
 
                   const sh = shId ? newBuildings[shId] : null;
-                  const shFull = !sh || storehouseTotal(sh) >= STOREHOUSE_MAX_ITEMS;
+                  const shFull = !sh || storehouseTotal(sh) >= storehouseCapacity(sh);
 
                   if (shFull) {
                     // Find a different, non-full storehouse.
                     const nextSh = findNearestStorehouse(newBuildings, unit.col, unit.row);
                     const isAlternative = nextSh &&
-                      storehouseTotal(nextSh) < STOREHOUSE_MAX_ITEMS &&
+                      storehouseTotal(nextSh) < storehouseCapacity(nextSh) &&
                       (nextSh.col !== dep.col || nextSh.row !== dep.row);
 
                     if (isAlternative) {
-                      const altPath = findPath(state.game.map, unit.col, unit.row, nextSh!.col, nextSh!.row);
+                      const altPath = findPath(state.game.map, unit.col, unit.row, nextSh!.col, nextSh!.row, blocked);
 
                       if (altPath.length > 0) {
                         units[id] = {
@@ -718,7 +802,7 @@ export const useStore = create<Store>()(
                   }
 
                   if (sh && unit.carrying && unit.carryingAmount > 0) {
-                    const free = Math.max(0, STOREHOUSE_MAX_ITEMS - storehouseTotal(sh));
+                    const free = Math.max(0, storehouseCapacity(sh) - storehouseTotal(sh));
                     const depositing = Math.min(unit.carryingAmount, free);
                     const prev = (sh.inventory[unit.carrying] ?? 0);
                     newBuildings[shId!] = {
@@ -746,7 +830,7 @@ export const useStore = create<Store>()(
                         const { ticks } = GATHER_TIER_CONFIG[unit.gatherTier];
                         units[id] = { ...unit, state: UnitState.Collecting, collectingTicksRemaining: ticks, depositTarget: null, depositingTicksRemaining: 0, carrying: null, carryingAmount: 0 };
                       } else {
-                        const backPath = findPath(state.game.map, unit.col, unit.row, gt.col, gt.row);
+                        const backPath = findPath(state.game.map, unit.col, unit.row, gt.col, gt.row, blocked);
 
                         if (backPath.length > 0) {
                           units[id] = { ...unit, state: UnitState.Moving, path: backPath, targetCol: gt.col, targetRow: gt.row, depositTarget: null, depositingTicksRemaining: 0, carrying: null, carryingAmount: 0 };
@@ -799,7 +883,7 @@ export const useStore = create<Store>()(
 
                       if (buildingHasRoom) {
                         // Deliver lumber to the building — carried to storehouse later.
-                        const dpath = findPath(state.game.map, unit.col, unit.row, assignedBuilding!.col, assignedBuilding!.row);
+                        const dpath = findPath(state.game.map, unit.col, unit.row, assignedBuilding!.col, assignedBuilding!.row, blocked);
                         units[id] = {
                           ...unit,
                           state: dpath.length > 0 ? UnitState.Moving : UnitState.Idle,
@@ -825,7 +909,7 @@ export const useStore = create<Store>()(
                               buildingTask: null,
                             };
                           } else {
-                            const depPath = findPath(state.game.map, unit.col, unit.row, storehouse.col, storehouse.row);
+                            const depPath = findPath(state.game.map, unit.col, unit.row, storehouse.col, storehouse.row, blocked);
                             units[id] = {
                               ...unit,
                               state: depPath.length > 0 ? UnitState.Moving : UnitState.Idle,
@@ -863,7 +947,7 @@ export const useStore = create<Store>()(
                           carryingAmount: harvested,
                         };
                       } else {
-                        const depPath = findPath(state.game.map, unit.col, unit.row, storehouse.col, storehouse.row);
+                        const depPath = findPath(state.game.map, unit.col, unit.row, storehouse.col, storehouse.row, blocked);
 
                         if (depPath.length > 0) {
                           units[id] = {
@@ -993,7 +1077,7 @@ export const useStore = create<Store>()(
                     const tgt = newBuildings[unit.assignedBuilding];
 
                     if (tgt) {
-                      const dpath = findPath(state.game.map, next.col, next.row, tgt.col, tgt.row);
+                      const dpath = findPath(state.game.map, next.col, next.row, tgt.col, tgt.row, blocked);
                       units[id] = {
                         ...unit,
                         prevCol: unit.col, prevRow: unit.row,
@@ -1040,7 +1124,7 @@ export const useStore = create<Store>()(
                       const sh = findNearestStorehouse(newBuildings, next.col, next.row);
 
                       if (sh) {
-                        const spath = findPath(state.game.map, next.col, next.row, sh.col, sh.row);
+                        const spath = findPath(state.game.map, next.col, next.row, sh.col, sh.row, blocked);
                         units[id] = {
                           ...unit,
                           prevCol: unit.col, prevRow: unit.row,
@@ -1082,7 +1166,7 @@ export const useStore = create<Store>()(
 
                   if (sh) {
                     const shId = Object.keys(newBuildings).find(k => newBuildings[k] === sh)!;
-                    const free = Math.max(0, STOREHOUSE_MAX_ITEMS - storehouseTotal(sh));
+                    const free = Math.max(0, storehouseCapacity(sh) - storehouseTotal(sh));
                     const depositing = Math.min(unit.carryingAmount, free);
 
                     if (depositing > 0) {
@@ -1237,7 +1321,7 @@ export const useStore = create<Store>()(
 
               // Don't produce if there's nowhere to deliver the output.
               const anyStorehouseSpace = Object.values(newBuildings).some(
-                b => b.type === BuildingType.Storehouse && storehouseTotal(b) < STOREHOUSE_MAX_ITEMS,
+                b => b.type === BuildingType.Storehouse && storehouseTotal(b) < storehouseCapacity(b),
               );
 
               if (!anyStorehouseSpace) continue;
@@ -1302,7 +1386,7 @@ export const useStore = create<Store>()(
                   if ((building.inventory[res] ?? 0) >= needed) continue;
                   const sh = findStorehouseWithResource(newBuildings, res as ResourceType, unit.col, unit.row);
                   if (!sh) continue;
-                  const fpath = findPath(state.game.map, unit.col, unit.row, sh.col, sh.row);
+                  const fpath = findPath(state.game.map, unit.col, unit.row, sh.col, sh.row, blocked);
                   if (fpath.length === 0) continue;
                   units[id] = {
                     ...unit,
@@ -1330,7 +1414,7 @@ export const useStore = create<Store>()(
                 );
 
                 if (!alreadyCarrying && (building.inventory[ResourceType.Lumber] ?? 0) > 0) {
-                  const fpath = findPath(state.game.map, unit.col, unit.row, building.col, building.row);
+                  const fpath = findPath(state.game.map, unit.col, unit.row, building.col, building.row, blocked);
 
                   if (fpath.length > 0) {
                     units[id] = {
@@ -1378,7 +1462,7 @@ export const useStore = create<Store>()(
                 }
 
                 if (bestTile) {
-                  const gpath = findPath(state.game.map, unit.col, unit.row, bestTile.col, bestTile.row);
+                  const gpath = findPath(state.game.map, unit.col, unit.row, bestTile.col, bestTile.row, blocked);
 
                   if (gpath.length > 0) {
                     units[id] = {
@@ -1406,7 +1490,7 @@ export const useStore = create<Store>()(
 
                   if (available <= 0) continue;
 
-                  const fpath = findPath(state.game.map, unit.col, unit.row, building.col, building.row);
+                  const fpath = findPath(state.game.map, unit.col, unit.row, building.col, building.row, blocked);
 
                   if (fpath.length === 0) continue;
 
@@ -1434,7 +1518,7 @@ export const useStore = create<Store>()(
 
                 if (!sh) continue;
 
-                const fpath = findPath(state.game.map, unit.col, unit.row, sh.col, sh.row);
+                const fpath = findPath(state.game.map, unit.col, unit.row, sh.col, sh.row, blocked);
 
                 if (fpath.length === 0) continue;
 
@@ -1478,7 +1562,7 @@ export const useStore = create<Store>()(
 
                   if (alreadyHandled) continue;
 
-                  const fpath = findPath(state.game.map, unit.col, unit.row, building.col, building.row);
+                  const fpath = findPath(state.game.map, unit.col, unit.row, building.col, building.row, blocked);
 
                   if (fpath.length === 0) continue;
 
@@ -1502,15 +1586,19 @@ export const useStore = create<Store>()(
             // Food consumption — 1 food per unit every FOOD_CONSUMPTION_INTERVAL ticks.
             if (newTick % FOOD_CONSUMPTION_INTERVAL === 0) {
               const unitCount = Object.keys(units).length;
+
               if (unitCount > 0) {
                 const food = newResources[PLAYER_ID]?.[ResourceType.Food] ?? 0;
-                const consumed = Math.min(unitCount, food);
-                if (consumed > 0) {
+                const toConsume = Math.min(unitCount, food);
+
+                if (toConsume > 0) {
+                  const drained = drainFromStorehouses(newBuildings, ResourceType.Food, toConsume);
                   newResources[PLAYER_ID] = {
                     ...newResources[PLAYER_ID],
-                    [ResourceType.Food]: food - consumed,
+                    [ResourceType.Food]: food - drained,
                   };
                   resourcesChanged = true;
+                  buildingsChanged = true;
                 }
               }
             }
@@ -1531,11 +1619,13 @@ export const useStore = create<Store>()(
                 const newUnit = makeUnit(spawnTile.col, spawnTile.row);
                 units[newUnit.id] = newUnit;
                 occupants[`${spawnTile.col},${spawnTile.row}`] = newUnit.id;
+                const drained = drainFromStorehouses(newBuildings, ResourceType.Food, SETTLEMENT_SPAWN_FOOD_COST);
                 newResources[PLAYER_ID] = {
                   ...newResources[PLAYER_ID],
-                  [ResourceType.Food]: food - SETTLEMENT_SPAWN_FOOD_COST,
+                  [ResourceType.Food]: food - drained,
                 };
                 resourcesChanged = true;
+                buildingsChanged = true;
               }
             }
 

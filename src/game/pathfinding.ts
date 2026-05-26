@@ -168,7 +168,21 @@ export const findPath = (
   map: MapState,
   startCol: number, startRow: number,
   endCol: number, endRow: number,
-): Array<{ col: number; row: number }> => astar(map, startCol, startRow, endCol, endRow, tileCost);
+  blocked?: Set<string>,
+): Array<{ col: number; row: number }> => {
+  if (!blocked) {
+
+    return astar(map, startCol, startRow, endCol, endRow, tileCost);
+  }
+
+  const endKey = key(endCol, endRow);
+  const blockedCost: CostFn = (m, col, row) =>
+    blocked.has(key(col, row)) && key(col, row) !== endKey
+      ? Infinity
+      : tileCost(m, col, row);
+
+  return astar(map, startCol, startRow, endCol, endRow, blockedCost);
+};
 
 export const findRoadPath = (
   map: MapState,

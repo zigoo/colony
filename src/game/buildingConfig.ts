@@ -52,6 +52,17 @@ export const BUILDING_LEVEL_CONFIG: Partial<Record<BuildingType, BuildingLevelCo
     { maxWorkers: 3 },
     { maxWorkers: 4 },
   ],
+  [BuildingType.Storehouse]: [
+    { maxWorkers: 0 }, // level 1 — 40 capacity
+    { maxWorkers: 0 }, // level 2 — 200 capacity
+  ],
+};
+
+// Resources consumed from the building's own inventory when upgrading to that level.
+export const BUILDING_UPGRADE_COST: Partial<Record<BuildingType, Partial<Record<number, Partial<Record<ResourceType, number>>>>>> = {
+  [BuildingType.Storehouse]: {
+    2: { [ResourceType.Planks]: 10 },
+  },
 };
 
 export interface BuildingProductionConfig {

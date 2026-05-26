@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 import { BuildingType, ResourceType, UnitState } from '../game/types';
-import { STOREHOUSE_MAX_ITEMS, TILE_H, CONSTRUCTION_MAX_WORKERS } from '../game/constants';
+import { STOREHOUSE_CAPACITY_BY_LEVEL, TILE_H, CONSTRUCTION_MAX_WORKERS } from '../game/constants';
 import { gridToWorld, worldToScreen } from '../game/isoMath';
-import { BUILDING_FOOTPRINT, getWorkerCapacity, getCurrentOutput, getEfficiency, BUILDING_LEVEL_CONFIG, BUILDING_PRODUCTION, CONSTRUCTION_TICKS, BUILDING_CONSTRUCTION_MATERIALS } from '../game/buildingConfig';
+import { BUILDING_FOOTPRINT, getWorkerCapacity, getCurrentOutput, getEfficiency, BUILDING_LEVEL_CONFIG, BUILDING_PRODUCTION, CONSTRUCTION_TICKS, BUILDING_CONSTRUCTION_MATERIALS, BUILDING_UPGRADE_COST } from '../game/buildingConfig';
 
 const PANEL_W = 200;
 
@@ -123,22 +124,31 @@ const fillBarOuter: React.CSSProperties = {
 // ── component ────────────────────────────────────────────────────────────────
 
 export const BuildingInfoPanel = () => {
-  const selectedBuildingId = useStore(s => s.ui.selectedBuildingId);
-  const selectBuilding     = useStore(s => s.selectBuilding);
-  const building           = useStore(s => selectedBuildingId ? s.game.buildings[selectedBuildingId] : null);
-  const camera             = useStore(s => s.camera);
-  const dismissWorker      = useStore(s => s.dismissWorker);
-  const assignWorker       = useStore(s => s.assignWorker);
-  const enRoute            = useStore(s =>
-    selectedBuildingId
-      ? Object.values(s.game.units).filter(u => u.reportingTo === selectedBuildingId).length
+  const {
+    selectedBuildingId,
+    building,
+    camera,
+    selectBuilding,
+    dismissWorker,
+    assignWorker,
+    upgradeBuilding,
+    enRoute,
+    hasFreeUnit,
+  } = useStore(useShallow(s => ({
+    selectedBuildingId: s.ui.selectedBuildingId,
+    building:           s.ui.selectedBuildingId ? s.game.buildings[s.ui.selectedBuildingId] : null,
+    camera:             s.camera,
+    selectBuilding:     s.selectBuilding,
+    dismissWorker:      s.dismissWorker,
+    assignWorker:       s.assignWorker,
+    upgradeBuilding:    s.upgradeBuilding,
+    enRoute:            s.ui.selectedBuildingId
+      ? Object.values(s.game.units).filter(u => u.reportingTo === s.ui.selectedBuildingId).length
       : 0,
-  );
-  const hasFreeUnit        = useStore(s =>
-    Object.values(s.game.units).some(u =>
+    hasFreeUnit:        Object.values(s.game.units).some(u =>
       u.state === UnitState.Idle && !u.reportingTo && !u.assignedBuilding,
     ),
-  );
+  })));
 
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const dragging  = useRef(false);
@@ -200,14 +210,20 @@ export const BuildingInfoPanel = () => {
   const inventory   = (Object.entries(building.inventory) as [ResourceType, number][]).filter(([k]) => !prodKeys.has(k));
   const hasItems    = inventory.some(([, v]) => v > 0);
   const total       = inventory.reduce((s, [, v]) => s + (v ?? 0), 0);
-  const isStore     = building.type === BuildingType.Storehouse;
-  const fillPct     = isStore ? Math.round((total / STOREHOUSE_MAX_ITEMS) * 100) : null;
-
   const constructionMax  = CONSTRUCTION_TICKS[building.type] ?? 0;
   const underConstruction = constructionMax > 0 && building.constructionProgress < constructionMax;
   const constructionPct  = underConstruction
     ? Math.round((building.constructionProgress / constructionMax) * 100)
     : 100;
+
+  const isStore        = building.type === BuildingType.Storehouse;
+  const storeCap       = isStore ? (STOREHOUSE_CAPACITY_BY_LEVEL[(building.level ?? 1) - 1] ?? 40) : 0;
+  const fillPct        = isStore ? Math.round((total / storeCap) * 100) : null;
+  const maxLevel       = BUILDING_LEVEL_CONFIG[building.type]?.length ?? 1;
+  const canUpgrade     = building.level < maxLevel && !underConstruction;
+  const upgradeCost    = BUILDING_UPGRADE_COST[building.type]?.[building.level + 1];
+  const canAffordUpgrade = !upgradeCost || (Object.entries(upgradeCost) as [ResourceType, number][])
+    .every(([res, amount]) => (building.inventory[res] ?? 0) >= amount);
 
   const capacity    = underConstruction
     ? Math.max(getWorkerCapacity(building.type, building.level), CONSTRUCTION_MAX_WORKERS)
@@ -216,7 +232,6 @@ export const BuildingInfoPanel = () => {
   const output      = getCurrentOutput(building.type, building.level, workers);
   const efficiency  = getEfficiency(building.type, building.level, workers);
   const effPct      = Math.round(efficiency * 100);
-  const maxLevel    = (BUILDING_LEVEL_CONFIG[building.type]?.length ?? 1);
   const hasWorkers  = capacity > 0;
 
   const effColor = effPct >= 80 ? '#7dda7d' : effPct >= 40 ? '#f0c060' : '#e05050';
@@ -491,7 +506,7 @@ export const BuildingInfoPanel = () => {
             <div style={rowStyle}>
               <span style={{ color: 'rgba(255,255,255,0.55)' }}>Capacity</span>
               <span style={{ color: fillPct! >= 100 ? '#e05050' : fillPct! >= 75 ? '#f0c060' : '#7dda7d' }}>
-                {total} / {STOREHOUSE_MAX_ITEMS}
+                {total} / {storeCap}
               </span>
             </div>
             <div style={fillBarOuter}>
@@ -502,6 +517,40 @@ export const BuildingInfoPanel = () => {
                 background: fillPct! >= 100 ? '#e05050' : fillPct! >= 75 ? '#f0c060' : '#5aaa5a',
                 transition: 'width 0.2s',
               }} />
+            </div>
+          </>
+        )}
+
+        {/* Upgrade button */}
+        {canUpgrade && (
+          <>
+            <div style={divider} />
+            <div style={{ marginTop: 4 }}>
+              {upgradeCost && (
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', marginBottom: 4 }}>
+                  Cost:{' '}
+                  {(Object.entries(upgradeCost) as [ResourceType, number][]).map(([res, amt]) => (
+                    <span key={res} style={{ color: canAffordUpgrade ? '#f0c060' : '#e05050' }}>
+                      {amt} {res}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={canAffordUpgrade ? () => upgradeBuilding(building.id) : undefined}
+                style={{
+                  width: '100%',
+                  padding: '5px 0',
+                  borderRadius: 4,
+                  border: `1px solid ${canAffordUpgrade ? 'rgba(240,192,96,0.6)' : 'rgba(255,255,255,0.15)'}`,
+                  background: canAffordUpgrade ? 'rgba(240,192,96,0.15)' : 'rgba(255,255,255,0.04)',
+                  color: canAffordUpgrade ? '#f0c060' : 'rgba(255,255,255,0.3)',
+                  fontSize: 12,
+                  cursor: canAffordUpgrade ? 'pointer' : 'default',
+                }}
+              >
+                Upgrade to Level {building.level + 1}
+              </button>
             </div>
           </>
         )}

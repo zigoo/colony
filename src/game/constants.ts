@@ -55,7 +55,8 @@ export const SETTLEMENT_SPAWN_FOOD_COST = 5;   // food consumed per new unit
 
 export const GATHER_TICKS = 5;
 export const DEPOSIT_TICKS = 4;
-export const STOREHOUSE_MAX_ITEMS = 40;
+export const STOREHOUSE_MAX_ITEMS = 40; // level 1 capacity — kept for backwards compat
+export const STOREHOUSE_CAPACITY_BY_LEVEL = [40, 200]; // index = level-1
 
 export const GATHER_TIER_CONFIG: Record<GatherTier, { amount: number; ticks: number }> = {
   [GatherTier.Gatherer]:  { amount: 1, ticks: 5  },
