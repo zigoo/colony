@@ -255,8 +255,27 @@ export const useCamera = (canvas: React.RefObject<HTMLCanvasElement | null>): vo
             if (ui.selectedUnitIds.length > 0) {
               const tile = game.map.tiles[`${col},${row}`];
 
-              if (tile?.hasResource) {
-                commandGather(ui.selectedUnitIds, col, row);
+              // Scan 3×3 around click — resource icons don't sit exactly on a tile
+              // center so a direct tile?.hasResource check misses clicks on icons.
+              let gatherCol = col, gatherRow = row, foundResource = tile?.hasResource ?? false;
+
+              if (!foundResource) {
+                outer: for (let dc = -1; dc <= 1; dc++) {
+                  for (let dr = -1; dr <= 1; dr++) {
+                    if (dc === 0 && dr === 0) continue;
+
+                    if (game.map.tiles[`${col + dc},${row + dr}`]?.hasResource) {
+                      gatherCol = col + dc;
+                      gatherRow = row + dr;
+                      foundResource = true;
+                      break outer;
+                    }
+                  }
+                }
+              }
+
+              if (foundResource) {
+                commandGather(ui.selectedUnitIds, gatherCol, gatherRow);
               } else {
                 ui.selectedUnitIds.forEach((id, index) => moveUnitTo(id, col, row, index * 2));
               }
