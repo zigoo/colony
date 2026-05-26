@@ -97,8 +97,12 @@ export const TREE_TARGET_HEIGHT: Record<TreeKey, number> = {
 const TREE_SWAY_AMP = 0.016;  // a bit stronger left-right
 const TREE_SWAY_SPEED = 1.27; // ~15% faster
 
-// Shared, mutable wind-time uniform — bump its value each frame to animate sway.
+// Shared, mutable uniforms. treeWind: animation time. treeCam: camera target on
+// the ground (XZ). treeFade: (start,end) distances over which trees shrink to
+// nothing toward the periphery — a smooth alternative to popping them out.
 export const treeWind = { value: 0 };
+export const treeCam = { value: new THREE.Vector2() };
+export const treeFade = { value: new THREE.Vector2(95, 135) };
 
 export interface TreeTemplate {
   geometry: THREE.BufferGeometry;
@@ -116,7 +120,11 @@ const injectSway = (material: THREE.Material): void => {
     shader.uniforms.uTime = treeWind;
     shader.uniforms.uSwayAmp = { value: TREE_SWAY_AMP };
     shader.uniforms.uSwaySpeed = { value: TREE_SWAY_SPEED };
-    shader.vertexShader = 'uniform float uTime;\nuniform float uSwayAmp;\nuniform float uSwaySpeed;\n' + shader.vertexShader;
+    shader.uniforms.uTreeCam = treeCam;
+    shader.uniforms.uTreeFade = treeFade;
+    shader.vertexShader =
+      'uniform float uTime;\nuniform float uSwayAmp;\nuniform float uSwaySpeed;\nuniform vec2 uTreeCam;\nuniform vec2 uTreeFade;\n'
+      + shader.vertexShader;
     shader.vertexShader = shader.vertexShader.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
@@ -126,6 +134,10 @@ const injectSway = (material: THREE.Material): void => {
         float swayH = max(transformed.y, 0.0);
         transformed.x += sin(uTime * uSwaySpeed + swayPhase) * swayH * uSwayAmp;
         transformed.z += cos(uTime * uSwaySpeed * 0.85 + swayPhase) * swayH * uSwayAmp * 0.6;
+        // Periphery fade: shrink the whole tree toward its base as it nears the
+        // draw-distance edge, so trees grow in / shrink out instead of popping.
+        float treeDist = distance(vec2(swayInst.x, swayInst.z), uTreeCam);
+        transformed *= 1.0 - smoothstep(uTreeFade.x, uTreeFade.y, treeDist);
       }`,
     );
   };
@@ -162,7 +174,13 @@ export const loadTrees = (): Promise<void> => {
           geometry.translate(0, -geometry.boundingBox!.min.y, 0); // base at y=0
           geometry.computeBoundingBox();
 
-          const material = (found.material as THREE.Material).clone();
+          // Cheaper lighting than the GLB's PBR material (Lambert ≈ same texture,
+          // simpler per-pixel shading) — big win with overlapping foliage.
+          const src = found.material as THREE.MeshStandardMaterial;
+          const material = new THREE.MeshLambertMaterial({
+            map: src.map ?? null,
+            color: src.color ? src.color.clone() : new THREE.Color(0xffffff),
+          });
           injectSway(material);
 
           treeTemplates[key] = { geometry, material, height: geometry.boundingBox!.max.y };
