@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { MapState } from '../../game/types';
 import { MAP_COLS, MAP_ROWS } from '../../game/constants';
 import { createHeightSampler, COL_OFFSET, ROW_OFFSET } from './terrain';
@@ -59,6 +63,21 @@ const HIGHLIGHT_TILE_SIZE = 0.92;
 const HIGHLIGHT_RENDER_ORDER = 10;
 const HIGHLIGHT_LIFT = 0.06; // × heightScale, lifts the quad clear of the surface
 
+// Footprint preview shown while placing a building (one quad scaled to the whole
+// footprint), tinted by whether the placement is valid.
+const PLACE_OK_COLOR = '#5fda7d';
+const PLACE_BAD_COLOR = '#e05050';
+const PLACE_OPACITY = 0.34;
+
+// Selection glow (postprocessing outline along the model silhouette).
+const OUTLINE_COLOR = '#7fe0ff';
+const OUTLINE_HIDDEN_COLOR = '#274b66'; // dimmer glow where the model is occluded
+const OUTLINE_STRENGTH = 3.5;
+const OUTLINE_GLOW = 0.7;     // soft blur/bloom of the edge
+const OUTLINE_THICKNESS = 1.5;
+const OUTLINE_PULSE = 2.5;    // gentle breathing pulse (seconds); 0 = steady
+const OUTLINE_SAMPLES = 4;    // MSAA for the composer render target (keep AA)
+
 const PICK_REFINE_ITERATIONS = 3;
 const UNIT_PROJECT_HEIGHT = 0.7; // world-Y of a unit's mid-body, for box-select projection
 
@@ -73,16 +92,32 @@ const makeTileHighlight = (color: string, opacity: number): THREE.Mesh => {
   return mesh;
 };
 
+// A 1×1 ground quad so mesh.scale maps directly to a tile footprint.
+const makeUnitTileQuad = (color: string, opacity: number): THREE.Mesh => {
+  const geo = new THREE.PlaneGeometry(1, 1);
+  geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.visible = false;
+  mesh.renderOrder = HIGHLIGHT_RENDER_ORDER;
+
+  return mesh;
+};
+
 export class GLScene {
   readonly scene = new THREE.Scene();
   readonly camera: THREE.OrthographicCamera;
   private readonly renderer: THREE.WebGLRenderer;
+  private readonly composer: EffectComposer;
+  private readonly outline: OutlinePass;
+  private selectedBuildingId: string | null = null;
   private readonly target = new THREE.Vector3(0, 0, 0);
   private readonly sun: THREE.DirectionalLight;
   private readonly hemi: THREE.HemisphereLight;
   private readonly water: THREE.Mesh;
   private readonly hoverMesh: THREE.Mesh;
   private readonly selectMesh: THREE.Mesh;
+  private readonly placeMesh: THREE.Mesh;
   private readonly raycaster = new THREE.Raycaster();
   private readonly entities: GLEntities;
   private readonly world: GLWorld;
@@ -142,11 +177,29 @@ export class GLScene {
 
     this.hoverMesh = makeTileHighlight(HOVER_COLOR, HOVER_OPACITY);
     this.selectMesh = makeTileHighlight(SELECT_COLOR, SELECT_OPACITY);
+    this.placeMesh = makeUnitTileQuad(PLACE_OK_COLOR, PLACE_OPACITY);
     this.scene.add(this.hoverMesh);
     this.scene.add(this.selectMesh);
+    this.scene.add(this.placeMesh);
 
     this.entities = new GLEntities(this.scene, (col, row) => this.heightAt(col, row));
     this.world = new GLWorld(this.scene);
+
+    // Postprocessing: render → outline-glow on the selected building → output.
+    // A multisampled target keeps the scene anti-aliased through the composer.
+    const composerTarget = new THREE.WebGLRenderTarget(1, 1, { samples: OUTLINE_SAMPLES });
+    this.composer = new EffectComposer(this.renderer, composerTarget);
+    this.composer.setPixelRatio(this.renderer.getPixelRatio());
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.outline = new OutlinePass(new THREE.Vector2(1, 1), this.scene, this.camera);
+    this.outline.edgeStrength = OUTLINE_STRENGTH;
+    this.outline.edgeGlow = OUTLINE_GLOW;
+    this.outline.edgeThickness = OUTLINE_THICKNESS;
+    this.outline.pulsePeriod = OUTLINE_PULSE;
+    this.outline.visibleEdgeColor.set(OUTLINE_COLOR);
+    this.outline.hiddenEdgeColor.set(OUTLINE_HIDDEN_COLOR);
+    this.composer.addPass(this.outline);
+    this.composer.addPass(new OutputPass());
 
     this.applyParams(this.params);
   }
@@ -228,6 +281,18 @@ export class GLScene {
     return this.heightSampler ? this.heightSampler(col + 0.5, row + 0.5) : 0;
   }
 
+  // Grid cell at the centre of the current view (the camera target), clamped
+  // inside the map — so spawns land near what the player is actually looking at.
+  viewCenterCell(): GridCell {
+    const col = Math.round(this.target.x + COL_OFFSET);
+    const row = Math.round(this.target.z + ROW_OFFSET);
+
+    return {
+      col: Math.max(1, Math.min(MAP_COLS - 2, col)),
+      row: Math.max(1, Math.min(MAP_ROWS - 2, row)),
+    };
+  }
+
   // Building id under the cursor (raycast against the building meshes), or null.
   pickBuildingId(ndcX: number, ndcY: number): string | null {
     this.raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
@@ -266,20 +331,44 @@ export class GLScene {
     this.placeTile(this.hoverMesh, cell);
   }
 
-  // Tints the hover tile (e.g. green/red during building placement).
-  setHoverColor(hex: string): void {
-    (this.hoverMesh.material as THREE.MeshBasicMaterial).color.set(hex);
-  }
-
   setSelected(cell: GridCell | null): void {
     this.selectedCell = cell;
     this.placeTile(this.selectMesh, cell);
+  }
+
+  // The building to glow as selected (resolved to its mesh each frame in render).
+  setSelectedBuilding(id: string | null): void {
+    this.selectedBuildingId = id;
+  }
+
+  // Footprint placement preview: a quad covering the whole footprint, tinted by
+  // validity. Pass cell = null to hide it.
+  setPlacement(cell: GridCell | null, fcols: number, frows: number, ok: boolean): void {
+    if (!cell) {
+      this.placeMesh.visible = false;
+
+      return;
+    }
+
+    const cx = cell.col + Math.floor(fcols / 2);
+    const cz = cell.row + Math.floor(frows / 2);
+
+    this.placeMesh.position.set(
+      cell.col + fcols / 2 - COL_OFFSET,
+      this.heightAt(cx, cz) + HIGHLIGHT_LIFT * this.params.heightScale,
+      cell.row + frows / 2 - ROW_OFFSET,
+    );
+    this.placeMesh.scale.set(fcols, 1, frows);
+    (this.placeMesh.material as THREE.MeshBasicMaterial).color.set(ok ? PLACE_OK_COLOR : PLACE_BAD_COLOR);
+    this.placeMesh.visible = true;
   }
 
   resize(width: number, height: number): void {
     this.width = width;
     this.height = height;
     this.renderer.setSize(width, height);
+    this.composer.setSize(width, height);
+    this.outline.setSize(width, height);
     this.updateFrustum();
   }
 
@@ -313,7 +402,10 @@ export class GLScene {
     this.world.update(this.target.x, this.target.z, viewRadius, this.camera);
 
     treeWind.value = performance.now() / 1000;
-    this.renderer.render(this.scene, this.camera);
+
+    const selected = this.selectedBuildingId ? this.entities.getBuildingObject(this.selectedBuildingId) : null;
+    this.outline.selectedObjects = selected ? [selected] : [];
+    this.composer.render();
 
     this.drawCalls = this.renderer.info.render.calls;
     this.triangles = this.renderer.info.render.triangles;
@@ -327,7 +419,10 @@ export class GLScene {
     (this.hoverMesh.material as THREE.Material).dispose();
     this.selectMesh.geometry.dispose();
     (this.selectMesh.material as THREE.Material).dispose();
+    this.placeMesh.geometry.dispose();
+    (this.placeMesh.material as THREE.Material).dispose();
     this.entities.dispose();
+    this.composer.dispose();
     this.renderer.dispose();
   }
 

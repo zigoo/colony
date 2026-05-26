@@ -9,6 +9,7 @@ import { UnitInfoPanel } from './components/UnitInfoPanel';
 import { BuildingInfoPanelGL } from './components/BuildingInfoPanelGL';
 import { FpsIndicator } from './components/FpsIndicator';
 import { BuildingMenuGL } from './components/BuildingMenuGL';
+import { DroneIndicator } from './components/DroneIndicator';
 import { HUD } from './components/HUD';
 import { Toolbar } from './components/Toolbar';
 import { Minimap } from './components/Minimap';
@@ -49,6 +50,7 @@ export default function App() {
       {glRenderer && <BuildingInfoPanelGL />}
       {glRenderer && <FpsIndicator />}
       {glRenderer && <BuildingMenuGL />}
+      {glRenderer && <DroneIndicator />}
       {!glRenderer && (
         <>
           <HUD />

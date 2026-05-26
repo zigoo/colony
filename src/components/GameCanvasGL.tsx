@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react';
-import { useStore, spawnAtCenter } from '../store';
+import { useStore } from '../store';
 import { GLScene } from '../renderer/gl/GLScene';
 import { useGLParams } from '../renderer/gl/glParams';
 import { computeSky } from '../renderer/gl/dayNightCycle';
@@ -7,12 +7,9 @@ import { useWorldClock } from '../renderer/gl/worldClock';
 import { useUnitHover } from '../renderer/gl/unitHover';
 import { registerZoom } from '../renderer/gl/glControls';
 import { useFps } from '../renderer/gl/fps';
+import { useDrone } from '../renderer/gl/drone';
 import { MIN_DRAG_DISTANCE, CAMERA_ZOOM_STEP_IN, CAMERA_ZOOM_STEP_OUT } from '../game/constants';
-import { canPlaceBuilding } from '../game/buildingConfig';
-
-const HOVER_COLOR = '#ffe14d';
-const PLACE_OK_COLOR = '#5fda7d';
-const PLACE_BAD_COLOR = '#e05050';
+import { canPlaceBuilding, BUILDING_FOOTPRINT } from '../game/buildingConfig';
 
 const TICK_MS = 100;
 const MAX_FRAME_DELTA_MS = 200; // clamp so a backgrounded tab doesn't fast-forward ticks
@@ -22,6 +19,20 @@ const EDGE_PAN_SPEED = 14;      // equivalent drag pixels/frame at the very edge
 const ROTATE_DEG_PER_PIXEL = 0.4; // right-drag orbit sensitivity
 const ROTATE_KEY_STEP = 15;       // Q/E discrete rotation step in degrees
 const RIGHT_BUTTON = 2;
+// move into array perhaps
+const DRONE_OSC_HIGH = 80;        // elevation the fly-over oscillates up to (starts here)
+const DRONE_OSC_LOW = 18;         // elevation the fly-over oscillates down to
+const DRONE_PERIOD_SEC = 12;      // seconds for a full high→low→high elevation cycle
+const DRONE_AZIMUTH_DEG = 55;     // heading the fly-over eases into
+const DRONE_PAN_SPEED = 38;       // drift speed (equivalent drag px/sec per axis)
+const DRONE_TRANSITION_SEC = 1.5; // ease-in (blend into oscillation) / ease-out (back to prior pose)
+
+const DRONE_OSC_MID = (DRONE_OSC_HIGH + DRONE_OSC_LOW) / 2;
+const DRONE_OSC_AMP = (DRONE_OSC_HIGH - DRONE_OSC_LOW) / 2;
+
+// Smooth S-curve (cubic bezier-like) easing for the drone transitions.
+const easeInOutCubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
 // Orbits the camera by adjusting the shared azimuth param, wrapped to [0, 360).
 const rotateCamera = (deltaDeg: number): void => {
@@ -60,6 +71,32 @@ export const GameCanvasGL = () => {
 
     // Live tuning: re-apply camera/light/terrain params whenever a slider moves.
     const unsubParams = useGLParams.subscribe((p) => glScene.applyParams(p));
+
+    // Drone mode: azimuth eases to a fixed heading while elevation oscillates
+    // high↔low (cinematic up/down sweep), all blended in from the current pose;
+    // exit always eases back to the pre-drone pose. The motion runs in the loop.
+    let droneSavedElevation = useGLParams.getState().camElevationDeg;
+    let droneSavedAzimuth = useGLParams.getState().camAzimuthDeg;
+    let droneStart = 0;
+    let droneStartElev = droneSavedElevation;
+    let droneStartAz = droneSavedAzimuth;
+    let droneLastElev = droneSavedElevation;
+    let droneLastAz = droneSavedAzimuth;
+    let droneExit: { fromElev: number; fromAz: number; start: number } | null = null;
+    const unsubDrone = useDrone.subscribe((s) => {
+      const p = useGLParams.getState();
+
+      if (s.active) {
+        droneSavedElevation = p.camElevationDeg;
+        droneSavedAzimuth = p.camAzimuthDeg;
+        droneStart = performance.now();
+        droneStartElev = p.camElevationDeg;
+        droneStartAz = p.camAzimuthDeg;
+        droneExit = null;
+      } else {
+        droneExit = { fromElev: droneLastElev, fromAz: droneLastAz, start: performance.now() };
+      }
+    });
 
     // ── interaction (pan + zoom + picking; shift+drag = box select) ──
     let dragging = false;
@@ -129,21 +166,24 @@ export const GameCanvasGL = () => {
 
       const n = toNdc(e);
       const cell = glScene.pickTile(n.x, n.y);
-      glScene.setHover(cell);
 
       const st = useStore.getState();
       const placing = st.ui.selectedBuildingType;
 
       if (placing) {
-        // Show placement validity; suppress the unit hover tooltip.
+        // Show the whole footprint tinted by validity; suppress single hover + tooltip.
+        const [fcols, frows] = BUILDING_FOOTPRINT[placing] ?? [1, 1];
         const ok = cell !== null && canPlaceBuilding(placing, cell.col, cell.row, st.game.map.tiles, st.game.buildings);
-        glScene.setHoverColor(ok ? PLACE_OK_COLOR : PLACE_BAD_COLOR);
+
+        glScene.setHover(null);
+        glScene.setPlacement(cell, fcols, frows, ok);
         useUnitHover.getState().set(null, 0, 0);
 
         return;
       }
 
-      glScene.setHoverColor(HOVER_COLOR);
+      glScene.setHover(cell);
+      glScene.setPlacement(null, 0, 0, true);
       const hoveredId = cell ? st.occupants[`${cell.col},${cell.row}`] : undefined;
       useUnitHover.getState().set(hoveredId ? st.game.units[hoveredId]?.name ?? null : null, e.clientX, e.clientY);
     };
@@ -176,7 +216,7 @@ export const GameCanvasGL = () => {
           if (cell && canPlaceBuilding(placing, cell.col, cell.row, store.game.map.tiles, store.game.buildings)) {
             store.placeBuilding(placing, cell.col, cell.row);
             store.selectBuildingType(null);
-            glScene.setHoverColor(HOVER_COLOR);
+            glScene.setPlacement(null, 0, 0, true);
           }
 
           dragging = false;
@@ -219,11 +259,23 @@ export const GameCanvasGL = () => {
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (useDrone.getState().active) {
+          useDrone.getState().set(false);
+
+          return;
+        }
+
         useStore.getState().selectUnits([]);
         useStore.getState().selectTile(null, null);
         useStore.getState().selectBuildingType(null);
         useStore.getState().selectBuilding(null);
-        glScene.setHoverColor(HOVER_COLOR);
+        glScene.setPlacement(null, 0, 0, true);
+
+        return;
+      }
+
+      if (e.key === 'v' || e.key === 'V') {
+        useDrone.getState().toggle();
 
         return;
       }
@@ -240,12 +292,18 @@ export const GameCanvasGL = () => {
         return;
       }
 
-      // Dev: press 'u' to spawn a settler on the selected tile.
+      // Dev: press 'u' to spawn a settler on the selected tile, else at the
+      // centre of the current GL view (the store's 2D camera is stale in GL).
       if (e.key === 'u' || e.key === 'U') {
         const { ui } = useStore.getState();
 
-        if (ui.selectedCol !== null && ui.selectedRow !== null) useStore.getState().spawnUnit(ui.selectedCol, ui.selectedRow);
-        else spawnAtCenter();
+        if (ui.selectedCol !== null && ui.selectedRow !== null) {
+          useStore.getState().spawnUnit(ui.selectedCol, ui.selectedRow);
+        } else {
+          const c = glScene.viewCenterCell();
+
+          useStore.getState().spawnUnit(c.col, c.row);
+        }
       }
     };
     const onResize = () => {
@@ -306,8 +364,41 @@ export const GameCanvasGL = () => {
         accumulator -= TICK_MS;
       }
 
+      // Drone fly-over: azimuth eases to its heading while elevation oscillates
+      // high↔low, both blended in from the entry pose; then a diagonal drift
+      // (ramped in with the same S-curve). Exit eases the pose back smoothly.
+      const droneOn = useDrone.getState().active;
+      let droneEase = 0;
+
+      if (droneOn) {
+        const t = (timestamp - droneStart) / 1000;
+        const blend = easeInOutCubic(Math.min(t / DRONE_TRANSITION_SEC, 1));
+        const osc = DRONE_OSC_MID + DRONE_OSC_AMP * Math.cos((2 * Math.PI * t) / DRONE_PERIOD_SEC);
+        const elev = lerp(droneStartElev, osc, blend);
+        const az = lerp(droneStartAz, DRONE_AZIMUTH_DEG, blend);
+
+        useGLParams.getState().set('camElevationDeg', elev);
+        useGLParams.getState().set('camAzimuthDeg', az);
+        droneLastElev = elev;
+        droneLastAz = az;
+        droneEase = blend;
+      } else if (droneExit) {
+        const e = easeInOutCubic(Math.min((timestamp - droneExit.start) / (DRONE_TRANSITION_SEC * 1000), 1));
+
+        useGLParams.getState().set('camElevationDeg', lerp(droneExit.fromElev, droneSavedElevation, e));
+        useGLParams.getState().set('camAzimuthDeg', lerp(droneExit.fromAz, droneSavedAzimuth, e));
+
+        if (e >= 1) droneExit = null;
+      }
+
+      if (droneOn) {
+        const f = delta / 1000;
+
+        glScene.pan(DRONE_PAN_SPEED * f * droneEase, DRONE_PAN_SPEED * f * droneEase);
+      }
+
       // Edge-scroll: hold the cursor near a screen edge to pan the map.
-      if (!dragging && !boxSelecting && mouseX >= 0) {
+      if (!dragging && !boxSelecting && mouseX >= 0 && !droneOn) {
         const w = window.innerWidth;
         const h = window.innerHeight;
         let ex = 0;
@@ -323,11 +414,12 @@ export const GameCanvasGL = () => {
       }
 
       const p = useGLParams.getState();
-      const { game } = useStore.getState();
+      const { game, ui } = useStore.getState();
       const sky = computeSky(game.tick, p.dayLengthSec, p.sunIntensity, p.hemiIntensity);
       glScene.applySky(sky);
       useWorldClock.getState().update(sky);
-      glScene.syncEntities(game.buildings, game.units, new Set(useStore.getState().ui.selectedUnitIds), delta / 1000);
+      glScene.syncEntities(game.buildings, game.units, new Set(ui.selectedUnitIds), delta / 1000);
+      glScene.setSelectedBuilding(ui.selectedBuildingId);
 
       glScene.render();
       rafId = requestAnimationFrame(loop);
@@ -337,8 +429,10 @@ export const GameCanvasGL = () => {
     return () => {
       cancelAnimationFrame(rafId);
       registerZoom(null);
+      if (useDrone.getState().active) useDrone.getState().set(false);
       unsubMap();
       unsubParams();
+      unsubDrone();
       unsubSel();
       el.removeEventListener('mousedown', onMouseDown);
       el.removeEventListener('contextmenu', onContextMenu);

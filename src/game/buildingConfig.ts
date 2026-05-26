@@ -26,7 +26,7 @@ export const CONSTRUCTION_TICKS: Partial<Record<BuildingType, number>> = {
 export const BUILDING_FOOTPRINT: Partial<Record<BuildingType, [number, number]>> = {
   [BuildingType.LumberCamp]: [2, 2],
   [BuildingType.Storehouse]: [2, 2],
-  [BuildingType.WoodCutter]: [2, 2],
+  [BuildingType.WoodCutter]: [10, 10],
   [BuildingType.Farm]:       [2, 2],
 };
 

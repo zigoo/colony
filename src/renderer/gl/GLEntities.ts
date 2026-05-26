@@ -16,7 +16,7 @@ type HeightAt = (col: number, row: number) => number;
 
 const DEFAULT_BUILDING_HEIGHT = 1.5;
 const BUILDING_FILL = 0.85;       // placeholder box span as a fraction of the footprint
-const BUILDING_MODEL_FILL = 5.4; // models overhang the footprint so they read big next to the tall trees
+const BUILDING_MODEL_FILL = 1.0; // models fill their footprint (no overhang → no clipping with units/terrain)
 
 const BUILDING_PLACEHOLDER: Partial<Record<BuildingType, { color: string; height: number }>> = {
   [BuildingType.Storehouse]: { color: '#b07d3a', height: 2.6 },
@@ -181,6 +181,11 @@ export class GLEntities {
         entry.mixer?.update(dt);
       }
     }
+  }
+
+  // The 3D object for a building id (for outlining the selection), or null.
+  getBuildingObject(id: string): THREE.Object3D | null {
+    return this.buildings.get(id)?.object ?? null;
   }
 
   // First building whose mesh the ray hits (walks up to the node tagged with the
