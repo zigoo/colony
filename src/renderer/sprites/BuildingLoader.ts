@@ -20,4 +20,9 @@ export const preloadBuildingSprites = (): void => {
   load('woodcutter_working',      '/assets/sprites/buildings/woodcutter/woodcutter_working.png');
   load('woodcutter_settled',      '/assets/sprites/buildings/woodcutter/woodcutter_settled.png');
   load('woodcutter_unoccupied',   '/assets/sprites/buildings/woodcutter/woodcutter_unoccupied.png');
+  load('farm_working',            '/assets/sprites/buildings/farm/farm_working.png');
+  load('farm_settled',            '/assets/sprites/buildings/farm/farm_settled.png');
+  load('farm_unoccupied',         '/assets/sprites/buildings/farm/farm_unoccupied.png');
+  load('construction_1',          '/assets/sprites/buildings/construction_stage1.png');
+  load('construction_2',          '/assets/sprites/buildings/construction_stage2.png');
 };

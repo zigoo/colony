@@ -1,11 +1,33 @@
 import { BuildingType, ResourceType, TileType } from './types';
 import type { Tile, Building } from './types';
 
+// Physical materials workers must deliver to the construction site before building can proceed.
+// Consumed from building inventory when construction completes.
+// Storehouse is pre-filled with these on placement (bootstrap — no existing Storehouse needed).
+export const BUILDING_CONSTRUCTION_MATERIALS: Partial<Record<BuildingType, Partial<Record<ResourceType, number>>>> = {
+  [BuildingType.WoodCutter]: { [ResourceType.Planks]: 5 },
+  [BuildingType.LumberCamp]: { [ResourceType.Planks]: 8 },
+  [BuildingType.Farm]:       { [ResourceType.Planks]: 6 },
+  [BuildingType.Storehouse]: { [ResourceType.Planks]: 4 },
+  [BuildingType.Quarry]:     { [ResourceType.Planks]: 6 },
+};
+
+// Ticks of worker-time required to complete construction (1 worker = 1 tick/tick).
+// Road and Settlement have no construction phase (instant placement).
+export const CONSTRUCTION_TICKS: Partial<Record<BuildingType, number>> = {
+  [BuildingType.WoodCutter]: 60,
+  [BuildingType.LumberCamp]: 80,
+  [BuildingType.Farm]:       70,
+  [BuildingType.Storehouse]: 50,
+  [BuildingType.Quarry]:     80,
+};
+
 // Tile footprint [cols, rows] — shared by rendering (anchor calc) and placement validation.
 export const BUILDING_FOOTPRINT: Partial<Record<BuildingType, [number, number]>> = {
   [BuildingType.LumberCamp]: [2, 2],
   [BuildingType.Storehouse]: [2, 2],
   [BuildingType.WoodCutter]: [2, 2],
+  [BuildingType.Farm]:       [2, 2],
 };
 
 export interface BuildingLevelConfig {
@@ -25,6 +47,11 @@ export const BUILDING_LEVEL_CONFIG: Partial<Record<BuildingType, BuildingLevelCo
     { maxWorkers: 3 },  // level 2
     { maxWorkers: 4 },  // level 3
   ],
+  [BuildingType.Farm]: [
+    { maxWorkers: 2 },
+    { maxWorkers: 3 },
+    { maxWorkers: 4 },
+  ],
 };
 
 export interface BuildingProductionConfig {
@@ -42,6 +69,13 @@ export const BUILDING_PRODUCTION: Partial<Record<BuildingType, BuildingProductio
     output:         { [ResourceType.Planks]: 2 },
     outputCapacity: { [ResourceType.Planks]: 20 },
     cycleTime:      30,
+  },
+  [BuildingType.Farm]: {
+    input:          {},
+    inputCapacity:  {},
+    output:         { [ResourceType.Food]: 1 },
+    outputCapacity: { [ResourceType.Food]: 20 },
+    cycleTime:      40,
   },
   // WoodCutter: workers gather from forest, cycleTime 0 = no production cycle.
   [BuildingType.WoodCutter]: {

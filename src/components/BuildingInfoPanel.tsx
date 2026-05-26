@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../store';
 import { BuildingType, ResourceType, UnitState } from '../game/types';
-import { STOREHOUSE_MAX_ITEMS, TILE_H } from '../game/constants';
+import { STOREHOUSE_MAX_ITEMS, TILE_H, CONSTRUCTION_MAX_WORKERS } from '../game/constants';
 import { gridToWorld, worldToScreen } from '../game/isoMath';
-import { BUILDING_FOOTPRINT, getWorkerCapacity, getCurrentOutput, getEfficiency, BUILDING_LEVEL_CONFIG, BUILDING_PRODUCTION } from '../game/buildingConfig';
+import { BUILDING_FOOTPRINT, getWorkerCapacity, getCurrentOutput, getEfficiency, BUILDING_LEVEL_CONFIG, BUILDING_PRODUCTION, CONSTRUCTION_TICKS, BUILDING_CONSTRUCTION_MATERIALS } from '../game/buildingConfig';
 
 const PANEL_W = 200;
 
@@ -27,15 +27,19 @@ const RESOURCE_ICON: Partial<Record<ResourceType, string>> = {
 };
 
 const BUILDING_SPRITE_HALF_W: Partial<Record<BuildingType, number>> = {
-  [BuildingType.LumberCamp]: 32,
-  [BuildingType.Storehouse]: 32,
-  [BuildingType.WoodCutter]: 32,
+  [BuildingType.LumberCamp]: 48,
+  [BuildingType.Storehouse]: 48,
+  [BuildingType.WoodCutter]: 48,
+  [BuildingType.Farm]:       48,
+  [BuildingType.Settlement]: 48,
 };
 
 const BUILDING_SPRITE_H: Partial<Record<BuildingType, number>> = {
-  [BuildingType.LumberCamp]: 96,
-  [BuildingType.Storehouse]: 213,
-  [BuildingType.WoodCutter]: 96,
+  [BuildingType.LumberCamp]: 144,
+  [BuildingType.Storehouse]: 320,
+  [BuildingType.WoodCutter]: 144,
+  [BuildingType.Farm]:       144,
+  [BuildingType.Settlement]: 144,
 };
 
 // ── styles ──────────────────────────────────────────────────────────────────
@@ -199,7 +203,15 @@ export const BuildingInfoPanel = () => {
   const isStore     = building.type === BuildingType.Storehouse;
   const fillPct     = isStore ? Math.round((total / STOREHOUSE_MAX_ITEMS) * 100) : null;
 
-  const capacity    = getWorkerCapacity(building.type, building.level);
+  const constructionMax  = CONSTRUCTION_TICKS[building.type] ?? 0;
+  const underConstruction = constructionMax > 0 && building.constructionProgress < constructionMax;
+  const constructionPct  = underConstruction
+    ? Math.round((building.constructionProgress / constructionMax) * 100)
+    : 100;
+
+  const capacity    = underConstruction
+    ? Math.max(getWorkerCapacity(building.type, building.level), CONSTRUCTION_MAX_WORKERS)
+    : getWorkerCapacity(building.type, building.level);
   const workers     = building.workerIds.length;
   const output      = getCurrentOutput(building.type, building.level, workers);
   const efficiency  = getEfficiency(building.type, building.level, workers);
@@ -230,13 +242,83 @@ export const BuildingInfoPanel = () => {
           <span>{building.level} <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11 }}>/ {maxLevel}</span></span>
         </div>
 
-        {/* Construction */}
-        {building.constructionProgress < 100 && (
-          <div style={rowStyle}>
-            <span style={{ color: 'rgba(255,255,255,0.55)' }}>Construction</span>
-            <span style={{ color: '#f0c060' }}>{building.constructionProgress}%</span>
-          </div>
-        )}
+        {/* Under construction — replaces worker/production sections */}
+        {underConstruction ? (
+          <>
+            <div style={divider} />
+            <div style={rowStyle}>
+              <span style={{ color: 'rgba(255,255,255,0.55)' }}>Building…</span>
+              <span style={{ color: '#f0c060' }}>{constructionPct}%</span>
+            </div>
+            <div style={fillBarOuter}>
+              <div style={{ height: '100%', width: `${constructionPct}%`, borderRadius: 3, background: '#f0c060', transition: 'width 0.2s' }} />
+            </div>
+
+            {/* Material requirements */}
+            {(() => {
+              const mats = Object.entries(BUILDING_CONSTRUCTION_MATERIALS[building.type] ?? {}) as [ResourceType, number][];
+              if (mats.length === 0) return null;
+              const allDelivered = mats.every(([res, needed]) => (building.inventory[res] ?? 0) >= needed);
+              return (
+                <div style={{ marginTop: 6 }}>
+                  {mats.map(([res, needed]) => {
+                    const have = building.inventory[res] ?? 0;
+                    const ok = have >= needed;
+                    return (
+                      <div key={res} style={{ ...rowStyle, fontSize: 12 }}>
+                        <span style={{ color: 'rgba(255,255,255,0.5)' }}>{RESOURCE_ICON[res] ?? ''} {res}</span>
+                        <span style={{ color: ok ? '#7dda7d' : '#e05050' }}>{have} / {needed}</span>
+                      </div>
+                    );
+                  })}
+                  {!allDelivered && (
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>
+                      Worker will fetch materials
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 6 }}>
+              {workers > 0
+                ? `${workers} worker${workers > 1 ? 's' : ''} constructing`
+                : 'Assign a worker to build'}
+            </div>
+
+            {/* Still show worker slots so user can assign builders */}
+            {hasWorkers && (
+              <>
+                <div style={divider} />
+                <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+                  {Array.from({ length: capacity }).map((_, i) => {
+                    const filled    = i < workers;
+                    const pending   = !filled && i < workers + enRoute;
+                    const canAssign = !filled && !pending && hasFreeUnit;
+                    return (
+                      <div
+                        key={i}
+                        onClick={canAssign ? () => assignWorker(building.id) : undefined}
+                        style={{
+                          width: 30, height: 30, borderRadius: '50%',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 15,
+                          background: filled ? 'rgba(80,160,80,0.25)' : pending ? 'rgba(200,160,40,0.18)' : canAssign ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.03)',
+                          border: filled ? '1.5px solid rgba(100,200,100,0.55)' : pending ? '1.5px solid rgba(220,180,60,0.5)' : canAssign ? '1.5px solid rgba(255,255,255,0.35)' : '1.5px solid rgba(255,255,255,0.12)',
+                          cursor: canAssign ? 'pointer' : 'default',
+                          opacity: !filled && !pending && !canAssign ? 0.4 : 1,
+                        }}
+                      >
+                        {filled ? '🔨' : pending ? '🚶' : canAssign ? '🔨' : ''}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </>
+        ) : (
+        <>
 
         {/* Worker slots */}
         {hasWorkers && (
@@ -423,6 +505,9 @@ export const BuildingInfoPanel = () => {
             </div>
           </>
         )}
+
+        </>
+        )} {/* end underConstruction else */}
 
       </div>
     </div>

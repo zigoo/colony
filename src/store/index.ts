@@ -3,8 +3,8 @@ import { persist, devtools } from 'zustand/middleware';
 import { generateMap } from '../game/mapGenerator';
 import { ResourceType, UnitType, UnitState, Direction, BuildingType, TileType, GatherTier } from '../game/types';
 import type { GameState, CameraState, UIState, Unit, Tile, Building } from '../game/types';
-import { canPlaceBuilding, getWorkerCapacity, BUILDING_PRODUCTION } from '../game/buildingConfig';
-import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM, UNIT_MOVE_TICKS, MAP_COLS, MAP_ROWS, GATHER_TIER_CONFIG, DEPOSIT_TICKS, STOREHOUSE_MAX_ITEMS, RESOURCE_REGROW_TICKS, RESOURCE_REGROW_AMOUNT } from '../game/constants';
+import { canPlaceBuilding, getWorkerCapacity, BUILDING_PRODUCTION, BUILDING_CONSTRUCTION_MATERIALS, CONSTRUCTION_TICKS } from '../game/buildingConfig';
+import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM, UNIT_MOVE_TICKS, MAP_COLS, MAP_ROWS, GATHER_TIER_CONFIG, DEPOSIT_TICKS, STOREHOUSE_MAX_ITEMS, RESOURCE_REGROW_TICKS, RESOURCE_REGROW_AMOUNT, FOOD_CONSUMPTION_INTERVAL, SETTLEMENT_SPAWN_INTERVAL, SETTLEMENT_SPAWN_FOOD_COST, CONSTRUCTION_MAX_WORKERS } from '../game/constants';
 import { createCamera } from '../renderer/Camera';
 import { findPath } from '../game/pathfinding';
 import { getDirection } from '../game/directionUtils';
@@ -45,6 +45,13 @@ interface Store {
   tick: () => void;
   rebuildOccupants: () => void;
 }
+
+const effectiveCapacity = (b: Building): number => {
+  const constructionMax = CONSTRUCTION_TICKS[b.type] ?? 0;
+  const underConstruction = constructionMax > 0 && b.constructionProgress < constructionMax;
+  const prod = getWorkerCapacity(b.type, b.level);
+  return underConstruction ? Math.max(prod, CONSTRUCTION_MAX_WORKERS) : prod;
+};
 
 const storehouseTotal = (b: Building): number =>
   Object.values(b.inventory).reduce((s, v) => s + (v ?? 0), 0);
@@ -144,9 +151,37 @@ const makeUnit = (col: number, row: number): Unit => ({
   buildingTask: null,
 });
 
+const makeStartingBuildings = (mapTiles: Record<string, Tile>): Record<string, Building> => {
+  const centerCol = Math.floor(MAP_COLS / 2);
+  const centerRow = Math.floor(MAP_ROWS / 2);
+  let col = centerCol, row = centerRow;
+  outer: for (let r = -8; r <= 8; r++) {
+    for (let c = -8; c <= 8; c++) {
+      const t = mapTiles[`${centerCol + c},${centerRow + r}`];
+      if (t && t.type !== TileType.Water && t.type !== TileType.Stone && t.type !== TileType.Mountain) {
+        col = centerCol + c; row = centerRow + r; break outer;
+      }
+    }
+  }
+  const id = `building-${col}-${row}`;
+  const constructionMax = CONSTRUCTION_TICKS[BuildingType.Storehouse] ?? 0;
+  const storehouse: Building = {
+    id, type: BuildingType.Storehouse, col, row,
+    ownerId: PLAYER_ID,
+    constructionProgress: constructionMax,
+    level: 1,
+    workerIds: [],
+    inventory: { [ResourceType.Planks]: 30 },
+    productionProgress: 0,
+  };
+  return { [id]: storehouse };
+};
+
+const startMap = generateMap();
+
 const initialGame: GameState = {
-  map: generateMap(),
-  buildings: {},
+  map: startMap,
+  buildings: makeStartingBuildings(startMap.tiles),
   units: {},
   resources: {
     [PLAYER_ID]: {
@@ -181,8 +216,9 @@ export const useStore = create<Store>()(
         occupants: {},
 
         generateNewMap: (seed) => {
+          const newMap = generateMap(seed);
           set((state) => ({
-            game: { ...state.game, map: generateMap(seed), tick: 0, savedAt: null, units: {}, buildings: {} },
+            game: { ...state.game, map: newMap, tick: 0, savedAt: null, units: {}, buildings: makeStartingBuildings(newMap.tiles) },
             occupants: {},
             ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null, selectedBuildingType: null, selectedBuildingId: null, debug: false },
           }), false, 'generateNewMap');
@@ -203,7 +239,11 @@ export const useStore = create<Store>()(
           }
           const migratedBuildings: Record<string, Building> = {};
           for (const [bid, b] of Object.entries(game.buildings)) {
-            migratedBuildings[bid] = { ...b, productionProgress: b.productionProgress ?? 0 };
+            migratedBuildings[bid] = {
+              ...b,
+              productionProgress:    b.productionProgress    ?? 0,
+              constructionProgress:  b.constructionProgress  ?? 100,
+            };
           }
           const migratedGame = { ...game, units: migratedUnits, buildings: migratedBuildings };
           set({ game: migratedGame, occupants: buildOccupants(migratedUnits), ui: { selectedCol: null, selectedRow: null, selectedUnitIds: [], selectionBox: null, selectedBuildingType: null, selectedBuildingId: null, debug: false } }, false, 'loadGameState');
@@ -427,9 +467,11 @@ export const useStore = create<Store>()(
           const { game } = get();
           const building = game.buildings[buildingId];
 
-          if (!building || getWorkerCapacity(building.type, building.level) === 0) return;
+          if (!building) return;
 
-          const capacity = getWorkerCapacity(building.type, building.level);
+          const capacity = effectiveCapacity(building);
+          if (capacity === 0) return;
+
           const enRoute = Object.values(game.units).filter(u => u.reportingTo === buildingId).length;
           const slots = capacity - building.workerIds.length - enRoute;
 
@@ -478,10 +520,10 @@ export const useStore = create<Store>()(
 
           if (!building) return;
 
-          const capacity  = getWorkerCapacity(building.type, building.level);
-          const enRoute   = Object.values(game.units).filter(u => u.reportingTo === buildingId).length;
+          const capacity = effectiveCapacity(building);
+          const enRoute  = Object.values(game.units).filter(u => u.reportingTo === buildingId).length;
 
-          if (building.workerIds.length + enRoute >= capacity) return;
+          if (capacity === 0 || building.workerIds.length + enRoute >= capacity) return;
 
           const free = Object.values(game.units)
             .filter(u => u.state === UnitState.Idle && !u.reportingTo && !u.assignedBuilding)
@@ -568,19 +610,37 @@ export const useStore = create<Store>()(
 
         placeBuilding: (type, col, row) => {
           const { game } = get();
+
           if (!canPlaceBuilding(type, col, row, game.map.tiles, game.buildings)) return;
 
+          const constructionTicks = CONSTRUCTION_TICKS[type] ?? 0;
           const id = `building-${col}-${row}`;
+
+          // Storehouse is pre-filled with its own construction materials (bootstrap — no Storehouse needed to build a Storehouse).
+          const initialInventory: Partial<Record<ResourceType, number>> = {};
+
+          if (type === BuildingType.Storehouse) {
+            for (const [res, amount] of Object.entries(BUILDING_CONSTRUCTION_MATERIALS[BuildingType.Storehouse] ?? {}) as [ResourceType, number][]) {
+              initialInventory[res] = amount;
+            }
+          }
+
           const building: Building = {
             id, type, col, row,
             ownerId: PLAYER_ID,
-            constructionProgress: 100,
+            constructionProgress: constructionTicks > 0 ? 0 : constructionTicks,
             level: 1,
             workerIds: [],
-            inventory: {},
+            inventory: initialInventory,
             productionProgress: 0,
           };
-          set((state) => ({ game: { ...state.game, buildings: { ...state.game.buildings, [id]: building } } }), false, 'placeBuilding');
+
+          set((state) => ({
+            game: {
+              ...state.game,
+              buildings: { ...state.game.buildings, [id]: building },
+            },
+          }), false, 'placeBuilding');
         },
 
         tick: () => {
@@ -874,7 +934,7 @@ export const useStore = create<Store>()(
                   const targetBuilding = newBuildings[unit.reportingTo];
 
                   if (targetBuilding && next.col === targetBuilding.col && next.row === targetBuilding.row) {
-                    const cap  = getWorkerCapacity(targetBuilding.type, targetBuilding.level);
+                    const cap  = effectiveCapacity(targetBuilding);
                     const fits = targetBuilding.workerIds.length < cap;
                     delete occupants[`${next.col},${next.row}`];
                     units[id] = {
@@ -1131,15 +1191,56 @@ export const useStore = create<Store>()(
               }
             }
 
-            // Building production cycles.
+            // Building construction + production cycles.
             for (const bid of Object.keys(newBuildings)) {
               const building = newBuildings[bid];
+              const constructionMax = CONSTRUCTION_TICKS[building.type] ?? 0;
+              const underConstruction = constructionMax > 0 && building.constructionProgress < constructionMax;
 
-              if (building.constructionProgress < 100 || building.workerIds.length === 0) continue;
+              if (underConstruction) {
+                const materials = BUILDING_CONSTRUCTION_MATERIALS[building.type] ?? {};
+                const materialsDelivered = (Object.entries(materials) as [ResourceType, number][]).every(
+                  ([res, needed]) => (building.inventory[res] ?? 0) >= needed,
+                );
+
+                if (materialsDelivered && building.workerIds.length > 0) {
+                  const atSite = building.workerIds.filter(wid => {
+                    const w = units[wid];
+                    return w && w.col === building.col && w.row === building.row;
+                  }).length;
+
+                  if (atSite > 0) {
+                    const newProg = Math.min(building.constructionProgress + atSite, constructionMax);
+
+                    if (newProg >= constructionMax) {
+                      const newInv = { ...building.inventory };
+                      for (const [res, needed] of Object.entries(materials) as [ResourceType, number][]) {
+                        newInv[res as ResourceType] = Math.max(0, (newInv[res as ResourceType] ?? 0) - needed);
+                      }
+                      newBuildings[bid] = { ...building, constructionProgress: newProg, inventory: newInv };
+                    } else {
+                      newBuildings[bid] = { ...building, constructionProgress: newProg };
+                    }
+
+                    buildingsChanged = true;
+                  }
+                }
+
+                continue;
+              }
+
+              if (building.workerIds.length === 0) continue;
 
               const prod = BUILDING_PRODUCTION[building.type];
 
               if (!prod || prod.cycleTime === 0) continue;
+
+              // Don't produce if there's nowhere to deliver the output.
+              const anyStorehouseSpace = Object.values(newBuildings).some(
+                b => b.type === BuildingType.Storehouse && storehouseTotal(b) < STOREHOUSE_MAX_ITEMS,
+              );
+
+              if (!anyStorehouseSpace) continue;
 
               const hasInput = (Object.entries(prod.input) as [ResourceType, number][]).every(
                 ([res, needed]) => (building.inventory[res] ?? 0) >= needed,
@@ -1190,6 +1291,32 @@ export const useStore = create<Store>()(
               const building = newBuildings[unit.assignedBuilding];
 
               if (!building) continue;
+
+              // Construction material fetch — reuses the existing 'fetch'→'deliver' transport flow.
+              const cMax = CONSTRUCTION_TICKS[building.type] ?? 0;
+              const isUnderConstruction = cMax > 0 && building.constructionProgress < cMax;
+
+              if (isUnderConstruction) {
+                const materials = BUILDING_CONSTRUCTION_MATERIALS[building.type] ?? {};
+                for (const [res, needed] of Object.entries(materials) as [ResourceType, number][]) {
+                  if ((building.inventory[res] ?? 0) >= needed) continue;
+                  const sh = findStorehouseWithResource(newBuildings, res as ResourceType, unit.col, unit.row);
+                  if (!sh) continue;
+                  const fpath = findPath(state.game.map, unit.col, unit.row, sh.col, sh.row);
+                  if (fpath.length === 0) continue;
+                  units[id] = {
+                    ...unit,
+                    state: UnitState.Moving,
+                    path: fpath,
+                    targetCol: sh.col, targetRow: sh.row,
+                    carrying: res as ResourceType,
+                    carryingAmount: 0,
+                    buildingTask: 'fetch',
+                  };
+                  break;
+                }
+                continue;
+              }
 
               const prod = BUILDING_PRODUCTION[building.type];
 
@@ -1335,6 +1462,10 @@ export const useStore = create<Store>()(
 
                 if (!prod) continue;
 
+                // Don't strip construction materials thinking they're finished output.
+                const bCMax = CONSTRUCTION_TICKS[building.type] ?? 0;
+                if (bCMax > 0 && building.constructionProgress < bCMax) continue;
+
                 for (const [res] of Object.entries(prod.output) as [ResourceType, number][]) {
                   const available = building.inventory[res] ?? 0;
 
@@ -1365,6 +1496,46 @@ export const useStore = create<Store>()(
                 }
 
                 if (units[id] !== unit) break;
+              }
+            }
+
+            // Food consumption — 1 food per unit every FOOD_CONSUMPTION_INTERVAL ticks.
+            if (newTick % FOOD_CONSUMPTION_INTERVAL === 0) {
+              const unitCount = Object.keys(units).length;
+              if (unitCount > 0) {
+                const food = newResources[PLAYER_ID]?.[ResourceType.Food] ?? 0;
+                const consumed = Math.min(unitCount, food);
+                if (consumed > 0) {
+                  newResources[PLAYER_ID] = {
+                    ...newResources[PLAYER_ID],
+                    [ResourceType.Food]: food - consumed,
+                  };
+                  resourcesChanged = true;
+                }
+              }
+            }
+
+            // Settlement population growth.
+            if (newTick % SETTLEMENT_SPAWN_INTERVAL === 0) {
+              for (const bid of Object.keys(newBuildings)) {
+                const b = newBuildings[bid];
+                if (b.type !== BuildingType.Settlement) continue;
+                if ((CONSTRUCTION_TICKS[BuildingType.Settlement] ?? 0) > 0 && b.constructionProgress < (CONSTRUCTION_TICKS[BuildingType.Settlement] ?? 0)) continue;
+
+                const food = newResources[PLAYER_ID]?.[ResourceType.Food] ?? 0;
+                if (food < SETTLEMENT_SPAWN_FOOD_COST) continue;
+
+                const spawnTile = findAdjacentFreeTile(b.col, b.row, tiles, occupants);
+                if (!spawnTile) continue;
+
+                const newUnit = makeUnit(spawnTile.col, spawnTile.row);
+                units[newUnit.id] = newUnit;
+                occupants[`${spawnTile.col},${spawnTile.row}`] = newUnit.id;
+                newResources[PLAYER_ID] = {
+                  ...newResources[PLAYER_ID],
+                  [ResourceType.Food]: food - SETTLEMENT_SPAWN_FOOD_COST,
+                };
+                resourcesChanged = true;
               }
             }
 

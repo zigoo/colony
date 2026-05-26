@@ -23,10 +23,31 @@ const MENU: Category[] = [
         ],
       },
       {
+        id: 'food',
+        label: 'Food',
+        buildings: [
+          { type: BuildingType.Farm, icon: '🌾' },
+        ],
+      },
+      {
         id: 'storage',
         label: 'Storage',
         buildings: [
           { type: BuildingType.Storehouse, icon: '📦' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'population',
+    label: 'People',
+    icon: '👥',
+    subcategories: [
+      {
+        id: 'housing',
+        label: 'Housing',
+        buildings: [
+          { type: BuildingType.Settlement, icon: '🏠' },
         ],
       },
     ],

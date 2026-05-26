@@ -3,12 +3,12 @@ import { BuildingType, BuildingStage } from '../../game/types';
 import { gridToWorld } from '../../game/isoMath';
 import { TILE_H, STOREHOUSE_MAX_ITEMS } from '../../game/constants';
 import { getBuildingSprite } from '../sprites/BuildingLoader';
-import { BUILDING_FOOTPRINT } from '../../game/buildingConfig';
+import { BUILDING_FOOTPRINT, CONSTRUCTION_TICKS } from '../../game/buildingConfig';
 import { placementPreview } from '../placementPreview';
 
 const STOREHOUSE_SRC_H  = 1024;
-const STOREHOUSE_DEST_W = 64;
-const STOREHOUSE_DEST_H = 213; // aspect ratio: 64 * 1024 / ~307 ≈ 213
+const STOREHOUSE_DEST_W = 96;
+const STOREHOUSE_DEST_H = 320; // aspect ratio: 96 * 1024 / ~307 ≈ 320
 
 // Measured pixel boundaries — sprites are NOT equal width (w=259..306, growing).
 // Split points chosen at gap midpoints so every frame captures its full content.
@@ -47,14 +47,19 @@ type StageRenderConfig = {
 // BuildingTypes without a config entry are silently skipped in renderBuildings.
 const STAGE_CONFIG: Partial<Record<BuildingType, Record<BuildingStage, StageRenderConfig>>> = {
   [BuildingType.LumberCamp]: {
-    [BuildingStage.Unoccupied]: { key: 'sawmill_unoccupied', srcW: 512, srcH: 768, destW: 64, destH: 96, frames: 1, fps: 1 },
-    [BuildingStage.Settled]:    { key: 'sawmill_settled',    srcW: 512, srcH: 768, destW: 64, destH: 96, frames: 1, fps: 1 },
-    [BuildingStage.Working]:    { key: 'sawmill_working',    srcW: 512, srcH: 768, destW: 64, destH: 96, frames: 8, fps: 8 },
+    [BuildingStage.Unoccupied]: { key: 'sawmill_unoccupied', srcW: 512, srcH: 768, destW: 96, destH: 144, frames: 1, fps: 1 },
+    [BuildingStage.Settled]:    { key: 'sawmill_settled',    srcW: 512, srcH: 768, destW: 96, destH: 144, frames: 1, fps: 1 },
+    [BuildingStage.Working]:    { key: 'sawmill_working',    srcW: 512, srcH: 768, destW: 96, destH: 144, frames: 8, fps: 8 },
   },
   [BuildingType.WoodCutter]: {
-    [BuildingStage.Unoccupied]: { key: 'woodcutter_unoccupied', srcW: 512, srcH: 768, destW: 64, destH: 96, frames: 1, fps: 1 },
-    [BuildingStage.Settled]:    { key: 'woodcutter_settled',    srcW: 512, srcH: 768, destW: 64, destH: 96, frames: 1, fps: 1 },
-    [BuildingStage.Working]:    { key: 'woodcutter_working',    srcW: 512, srcH: 768, destW: 64, destH: 96, frames: 8, fps: 8 },
+    [BuildingStage.Unoccupied]: { key: 'woodcutter_unoccupied', srcW: 512, srcH: 768, destW: 96, destH: 144, frames: 1, fps: 1 },
+    [BuildingStage.Settled]:    { key: 'woodcutter_settled',    srcW: 512, srcH: 768, destW: 96, destH: 144, frames: 1, fps: 1 },
+    [BuildingStage.Working]:    { key: 'woodcutter_working',    srcW: 512, srcH: 768, destW: 96, destH: 144, frames: 8, fps: 8 },
+  },
+  [BuildingType.Farm]: {
+    [BuildingStage.Unoccupied]: { key: 'farm_unoccupied', srcW: 512, srcH: 768, destW: 96, destH: 144, frames: 1, fps: 1 },
+    [BuildingStage.Settled]:    { key: 'farm_settled',    srcW: 512, srcH: 768, destW: 96, destH: 144, frames: 1, fps: 1 },
+    [BuildingStage.Working]:    { key: 'farm_working',    srcW: 512, srcH: 768, destW: 96, destH: 144, frames: 8, fps: 8 },
   },
 };
 
@@ -128,10 +133,44 @@ export const renderBuildings = (
   const sorted = Object.values(buildings).sort((a, b) => (a.row + a.col) - (b.row + b.col));
 
   for (const building of sorted) {
-    if (building.constructionProgress < 100) continue;
-
     const { x: wx, y: wy } = gridToWorld(building.col, building.row);
     const anchorY = footprintAnchorY(building.type, wy);
+    const constructionMax = CONSTRUCTION_TICKS[building.type] ?? 0;
+    const underConstruction = constructionMax > 0 && building.constructionProgress < constructionMax;
+
+    if (underConstruction) {
+      const pct   = building.constructionProgress / constructionMax;
+      const stage = pct < 0.5 ? 1 : 2;
+      const cImg  = getBuildingSprite(`construction_${stage}`);
+      const srcW  = 512, srcH = 768, frames = 4, fps = 4;
+      const dW    = 96,  dH   = 144;
+      const dX    = wx - dW / 2;
+      const dY    = anchorY - dH;
+
+      if (cImg?.complete && cImg.naturalWidth > 0) {
+        const frame = Math.floor(timestamp / (1000 / fps)) % frames;
+        ctx.drawImage(cImg, frame * srcW, 0, srcW, srcH, dX, dY, dW, dH);
+      } else {
+        // Programmatic scaffold fallback (shown before image loads)
+        ctx.save();
+        ctx.strokeStyle = '#c8a020';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.strokeRect(dX + 4, dY + 4, dW - 8, dH - 8);
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+
+      // Progress bar in world space (scales with zoom)
+      const barW = 48, barH = 5;
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(wx - barW / 2, dY - 9, barW, barH);
+      ctx.fillStyle = '#f0c060';
+      ctx.fillRect(wx - barW / 2, dY - 9, Math.round(barW * pct), barH);
+      ctx.restore();
+      continue;
+    }
 
     if (building.type === BuildingType.Storehouse) {
       const img = getBuildingSprite('storehouse_sheet');

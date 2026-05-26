@@ -38,9 +38,11 @@ const findUnitAtWorld = (
 
 // World-space hit sizes match what BuildingLayer renders.
 const BUILDING_HIT_SIZE: Partial<Record<BuildingType, { w: number; h: number }>> = {
-  [BuildingType.LumberCamp]: { w: 64, h: 96 },
-  [BuildingType.Storehouse]: { w: 64, h: 213 },
-  [BuildingType.WoodCutter]: { w: 64, h: 96 },
+  [BuildingType.LumberCamp]: { w: 96, h: 144 },
+  [BuildingType.Storehouse]: { w: 96, h: 320 },
+  [BuildingType.WoodCutter]: { w: 96, h: 144 },
+  [BuildingType.Farm]:       { w: 96, h: 144 },
+  [BuildingType.Settlement]: { w: 96, h: 144 },
 };
 
 const findBuildingAtWorld = (
@@ -49,8 +51,6 @@ const findBuildingAtWorld = (
   buildings: Record<string, Building>,
 ): Building | undefined => {
   for (const building of Object.values(buildings)) {
-    if (building.constructionProgress < 100) continue;
-
     const size = BUILDING_HIT_SIZE[building.type];
 
     if (!size) continue;

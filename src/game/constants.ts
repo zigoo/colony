@@ -48,6 +48,11 @@ export const RESOURCE_AMOUNT_MAX: Partial<Record<ResourceType, number>> = {
   [ResourceType.Ore]:   RESOURCE_AMOUNT.oreMax,
 };
 
+export const CONSTRUCTION_MAX_WORKERS   = 2;   // max builders assignable during construction
+export const FOOD_CONSUMPTION_INTERVAL  = 200; // ticks between food consumption (1 food per unit)
+export const SETTLEMENT_SPAWN_INTERVAL  = 400; // ticks between settlement spawn attempts
+export const SETTLEMENT_SPAWN_FOOD_COST = 5;   // food consumed per new unit
+
 export const GATHER_TICKS = 5;
 export const DEPOSIT_TICKS = 4;
 export const STOREHOUSE_MAX_ITEMS = 40;
