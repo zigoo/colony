@@ -39,7 +39,7 @@ The codebase is split along a **renderer-agnostic boundary** that is the most im
 One large Zustand store (`devtools` + `persist` middleware) holds three slices: `game` (map, units, buildings, resources, tick), `camera`, and `ui`. Plus an `occupants` index (`"col,row" -> unitId`) maintained alongside `units` for fast tile-occupancy lookups.
 
 - **`tick()` is the simulation step** and by far the largest function. It runs the entire unit AI / resource-transport state machine, building construction, production cycles, food consumption, and population growth. When changing gameplay behavior, you are almost always editing `tick()`.
-- Persistence: only the `game` slice is persisted, under localStorage key **`settlers-v5`**. If you change the shape of persisted state, bump this key and add migration logic in `loadGameState` (which already back-fills missing fields on load).
+- Persistence: only the `game` slice is persisted, under localStorage key **`settlers-v7`**. If you change the shape of persisted state, bump this key and add migration logic in `loadGameState` (which already back-fills missing fields on load).
 - `PLAYER_ID = 'player1'` — resources are keyed per owner; there is currently one player.
 
 ### Tick-based simulation (`src/hooks/useGameLoop.ts`)
@@ -70,12 +70,30 @@ A* over the tile grid. `findPath(map, ...startend..., blocked?)` takes an option
 
 `Renderer.ts` applies the camera transform and calls layers in painter's order: tiles → resources → buildings → selection → units → placement preview → debug. Each `layers/*Layer.ts` is a pure draw function. Asset loaders (`*Loader.ts`, `tileTextures.ts`, `roadGen.ts`) preload sprite sheets / bake procedural canvas textures; assets are served from `public/assets/`.
 
-### Three.js migration (in progress, `src/renderer/gl/`)
+### WebGL renderer (`src/renderer/gl/`) — now the default
 
-A WebGL renderer is being built to replace the 2D canvas, **side-by-side behind a flag**: press **`G`** (or add `?gl=1` to the URL) to toggle. `App.tsx` swaps `<GameCanvas>` for `<GameCanvasGL>`. The game logic/store is shared and untouched; only the render + input layer differs. Key points:
-- Fixed **dimetric orthographic** camera (30° elevation / 45° azimuth) to match the 2:1 look of the existing sprite art — pan/zoom only, no free rotation.
-- Terrain is **one continuous heightmap mesh** (`gl/terrain.ts`) whose visual resolution is decoupled from the gameplay grid via `TERRAIN_SUB` (subdivision factor). Smooth vertex-color interpolation + noise replace the per-tile diamond blending of the 2D renderer.
-- The 2D renderer remains the source of truth for feature parity until the GL path catches up; do not delete it.
+The Three.js renderer is the default; press **`G`** (or add `?2d` to the URL) to fall back to the 2D canvas. `App.tsx` swaps `<GameCanvas>` for `<GameCanvasGL>`. Game logic/store is shared and untouched — only the render + input layer differs. The 2D renderer is kept as a fallback; don't delete it.
+
+Pieces:
+- **`GLScene`** — owns the renderer, the fixed **dimetric orthographic** camera (low tilt matching the sprite-art angle, pan/zoom only), lights, water plane, hover/selection tile highlights, raycast picking, and the per-frame loop hooks. Holds `GLWorld` + `GLEntities`.
+- **`GLWorld`** — streams the world. Terrain + forest are built as **chunks** (`TERRAIN_CHUNK_TILES`) only around the camera and freed when they leave range, so cost scales with the *view*, not the 840² map. Per-chunk **LOD** (distant chunks coarser), **manual AABB frustum culling**, and **terrain LOD rebuilds** as the camera moves.
+- **`terrain.ts`** — builds a single chunk's heightmap mesh from a shared height/color field (so chunks tile seamlessly); analytic normals from the field (no LOD-seam cracks). Tile types are read from a precomputed `Int8Array` grid (no per-vertex allocation → cheap builds). `createHeightSampler` gives picking/entities the same heights.
+- **`GLForest`** — builds a chunk's trees as one `InstancedMesh` per variant (pine/oak/bush; models loaded once in `glModels.ts`). Trees only render within a small radius of the camera; a shader (`glModels` `injectSway`) adds per-instance wind sway and a **periphery shrink** (trees scale to nothing toward the draw-distance edge instead of popping). Material is `MeshLambertMaterial` (cheap shading).
+- **`GLEntities`** — units (animated settler GLB) + buildings (placeholder boxes) synced from the store each frame.
+- **`dayNightCycle.ts` / `worldClock.ts`** — sun direction/color/intensity + sky from the game tick (real Wrocław sunrise/sunset per season); bottom-right clock.
+
+#### Performance levers (most impactful first)
+
+The on-screen HUD shows `FPS · calls · tris · trees` (`FpsIndicator`) — use it to find the bottleneck (high `tris` = geometry/culling; low `tris` but low FPS = CPU/build churn).
+
+- **`terrainSub`** (`glParams.ts`, live in the dev panel) — terrain mesh density. The single biggest vertex lever.
+- **`MAP_COLS/ROWS`** (`constants.ts`) — map size. Bump the persist key (`settlers-vN` in `store/index.ts`) when changed so a fresh map regenerates (tiles aren't persisted — only the seed).
+- **`MAX_RADIUS_CHUNKS`, `BUILD_BUDGET`, `lodSubFor`** (`GLWorld.ts`) — how far terrain streams (memory/zoom-out cost), chunks built per frame (fill speed vs. hitch), and the distance→LOD tiers.
+- **`FOREST_DENSITY`, `SCALE_MIN/MAX`** (`GLForest.ts`) — tree count and height spread (fewer + taller still reads as dense).
+- **`TREE_RADIUS_CHUNKS`, `FADE_START/FADE_END`** (`GLWorld.ts`) — tree draw distance + the periphery fade range.
+- **`TREE_HIDE_ZOOM`** (`GLScene.ts`) — hides trees entirely when zoomed far out.
+- **`MIN_ZOOM`** (`GLScene.ts`) — lower = zoom out further (bigger footprint = more chunks = heavier).
+- Trees are instanced + use a cheap Lambert material; the tile-type grid keeps chunk building allocation-free. These were the fixes that took it from ~15 to 80–100+ FPS on the 840² map.
 
 ## Input & interaction (`src/hooks/useCamera.ts`)
 
