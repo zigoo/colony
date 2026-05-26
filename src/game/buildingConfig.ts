@@ -157,7 +157,7 @@ export const canPlaceBuilding = (
 
   for (const { col: c, row: r } of footprint) {
     const tile = mapTiles[`${c},${r}`];
-    if (!tile || tile.type === TileType.Water || tile.type === TileType.Stone) return false;
+    if (!tile || tile.type === TileType.Water || tile.type === TileType.Sand || tile.type === TileType.Stone || tile.type === TileType.Mountain) return false;
   }
 
   const occupied = new Set<string>();
