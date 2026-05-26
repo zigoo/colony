@@ -124,6 +124,13 @@ export interface Unit {
   reportingTo: string | null;
   assignedBuilding: string | null;
   buildingTask: 'fetch' | 'deliver' | 'fetch-output' | 'carry' | null;
+  name: string;
+  bornAtTick: number;
+  distanceTraveled: number;
+  stamina: number;
+  maxStamina: number;
+  health: number;
+  running: boolean;
 }
 
 export type ResourceInventory = Record<Exclude<ResourceType, ResourceType.None>, number>;

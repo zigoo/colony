@@ -92,7 +92,26 @@ export const TILE_COLORS: Record<TileType, string> = {
   [TileType.Mountain]: '#6e6e6e',
 };
 
-export const UNIT_MOVE_TICKS = 3;
+export const UNIT_MOVE_TICKS = 3;       // ticks to cross a tile at walking pace
+export const RUN_MOVE_TICKS = 2;        // ticks to cross a tile while running (faster)
+
+// Stamina / running. Drains while running, regenerates while idle (and slightly
+// while walking). Hysteresis: a tired unit must recover past the threshold
+// before it starts running again.
+export const STAMINA_MAX = 100;
+export const STAMINA_RUN_DRAIN = 1.4;   // per tick while running
+export const STAMINA_IDLE_REGEN = 0.9;  // per tick while idle
+export const STAMINA_WALK_REGEN = 0.2;  // per tick while moving but not running
+export const STAMINA_RUN_THRESHOLD = 25; // min stamina to (re)start running
+export const HEALTH_MAX = 100;
+
+// Random settler names, picked at spawn.
+export const UNIT_NAMES = [
+  'Bjorn', 'Greta', 'Hauk', 'Ingrid', 'Knut', 'Liv', 'Magnus', 'Sigrid',
+  'Torsten', 'Astrid', 'Erik', 'Frida', 'Gunnar', 'Helga', 'Ivar', 'Solveig',
+  'Rurik', 'Dagny', 'Oskar', 'Runa', 'Vidar', 'Yrsa', 'Halvard', 'Tove',
+];
+
 export const SPRITE_BASE_PATH = '/assets/sprites/units/character';
 
 export const ANIMATION_FPS: Record<string, number> = {

@@ -4,7 +4,7 @@ import { generateMap } from '../game/mapGenerator';
 import { ResourceType, UnitType, UnitState, Direction, BuildingType, TileType, GatherTier } from '../game/types';
 import type { GameState, CameraState, UIState, Unit, Tile, Building } from '../game/types';
 import { canPlaceBuilding, getWorkerCapacity, BUILDING_PRODUCTION, BUILDING_CONSTRUCTION_MATERIALS, CONSTRUCTION_TICKS, getFootprintTiles, BUILDING_UPGRADE_COST, BUILDING_LEVEL_CONFIG } from '../game/buildingConfig';
-import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM, UNIT_MOVE_TICKS, MAP_COLS, MAP_ROWS, GATHER_TIER_CONFIG, DEPOSIT_TICKS, STOREHOUSE_MAX_ITEMS, STOREHOUSE_CAPACITY_BY_LEVEL, RESOURCE_REGROW_TICKS, RESOURCE_REGROW_AMOUNT, FOOD_CONSUMPTION_INTERVAL, SETTLEMENT_SPAWN_INTERVAL, SETTLEMENT_SPAWN_FOOD_COST, CONSTRUCTION_MAX_WORKERS } from '../game/constants';
+import { CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM, UNIT_MOVE_TICKS, RUN_MOVE_TICKS, MAP_COLS, MAP_ROWS, GATHER_TIER_CONFIG, DEPOSIT_TICKS, STOREHOUSE_MAX_ITEMS, STOREHOUSE_CAPACITY_BY_LEVEL, RESOURCE_REGROW_TICKS, RESOURCE_REGROW_AMOUNT, FOOD_CONSUMPTION_INTERVAL, SETTLEMENT_SPAWN_INTERVAL, SETTLEMENT_SPAWN_FOOD_COST, CONSTRUCTION_MAX_WORKERS, STAMINA_MAX, STAMINA_RUN_DRAIN, STAMINA_IDLE_REGEN, STAMINA_WALK_REGEN, STAMINA_RUN_THRESHOLD, HEALTH_MAX, UNIT_NAMES } from '../game/constants';
 import { createCamera } from '../renderer/Camera';
 import { findPath } from '../game/pathfinding';
 import { getDirection } from '../game/directionUtils';
@@ -168,7 +168,9 @@ const findAdjacentFreeTile = (
 
 let nextUnitIndex = 1;
 
-const makeUnit = (col: number, row: number): Unit => ({
+const randomName = (): string => UNIT_NAMES[Math.floor(Math.random() * UNIT_NAMES.length)];
+
+const makeUnit = (col: number, row: number, bornAtTick = 0): Unit => ({
   id: `unit-${nextUnitIndex++}`,
   type: UnitType.Settler,
   gatherTier: GatherTier.Gatherer,
@@ -189,6 +191,13 @@ const makeUnit = (col: number, row: number): Unit => ({
   reportingTo: null,
   assignedBuilding: null,
   buildingTask: null,
+  name: randomName(),
+  bornAtTick,
+  distanceTraveled: 0,
+  stamina: STAMINA_MAX,
+  maxStamina: STAMINA_MAX,
+  health: HEALTH_MAX,
+  running: false,
 });
 
 const makeStartingBuildings = (mapTiles: Record<string, Tile>): Record<string, Building> => {
@@ -275,6 +284,13 @@ export const useStore = create<Store>()(
               reportingTo:              unit.reportingTo ?? null,
             assignedBuilding:         (unit as Unit).assignedBuilding ?? null,
             buildingTask:             (unit as Unit).buildingTask ?? null,
+              name:             unit.name ?? randomName(),
+              bornAtTick:       unit.bornAtTick ?? 0,
+              distanceTraveled: unit.distanceTraveled ?? 0,
+              stamina:          unit.stamina ?? STAMINA_MAX,
+              maxStamina:       unit.maxStamina ?? STAMINA_MAX,
+              health:           unit.health ?? HEALTH_MAX,
+              running:          unit.running ?? false,
             };
           }
           const migratedBuildings: Record<string, Building> = {};
@@ -358,7 +374,7 @@ export const useStore = create<Store>()(
         },
 
         spawnUnit: (col, row) => {
-          const unit = makeUnit(col, row);
+          const unit = makeUnit(col, row, get().game.tick);
           set((state) => ({
             game: { ...state.game, units: { ...state.game.units, [unit.id]: unit } },
             occupants: { ...state.occupants, [`${col},${row}`]: unit.id },
@@ -611,7 +627,7 @@ export const useStore = create<Store>()(
                 building.col, building.row,
                 state.game.map.tiles, state.occupants,
               ) ?? { col: building.col, row: building.row };
-              const unit = makeUnit(spawn.col, spawn.row);
+              const unit = makeUnit(spawn.col, spawn.row, state.game.tick);
               newUnits = { ...state.game.units, [unit.id]: unit };
               newOccupants = { ...state.occupants, [`${spawn.col},${spawn.row}`]: unit.id };
             }
@@ -1004,7 +1020,8 @@ export const useStore = create<Store>()(
 
               if (unit.state !== UnitState.Moving || unit.path.length === 0) continue;
 
-              const newProgress = unit.moveProgress + 1 / UNIT_MOVE_TICKS;
+              const moveTicks = unit.running ? RUN_MOVE_TICKS : UNIT_MOVE_TICKS;
+              const newProgress = unit.moveProgress + 1 / moveTicks;
 
               if (newProgress >= 1) {
                 const [next, ...remaining] = unit.path;
@@ -1012,6 +1029,8 @@ export const useStore = create<Store>()(
 
                 delete occupants[`${unit.col},${unit.row}`];
                 occupants[`${next.col},${next.row}`] = id;
+
+                unit.distanceTraveled += 1; // tile arrival (counts the common move path)
 
                 // Unit arrives at its assigned building — register as worker.
                 if (remaining.length === 0 && unit.reportingTo) {
@@ -1616,7 +1635,7 @@ export const useStore = create<Store>()(
                 const spawnTile = findAdjacentFreeTile(b.col, b.row, tiles, occupants);
                 if (!spawnTile) continue;
 
-                const newUnit = makeUnit(spawnTile.col, spawnTile.row);
+                const newUnit = makeUnit(spawnTile.col, spawnTile.row, newTick);
                 units[newUnit.id] = newUnit;
                 occupants[`${spawnTile.col},${spawnTile.row}`] = newUnit.id;
                 const drained = drainFromStorehouses(newBuildings, ResourceType.Food, SETTLEMENT_SPAWN_FOOD_COST);
@@ -1627,6 +1646,29 @@ export const useStore = create<Store>()(
                 resourcesChanged = true;
                 buildingsChanged = true;
               }
+            }
+
+            // Stamina + running: running drains it, idle recharges it, walking
+            // (out of stamina) trickles back. Hysteresis on the run threshold so a
+            // tired unit walks until recovered, then runs again. Sets next tick's
+            // running flag (consumed by the movement-speed calc above).
+            for (const id of Object.keys(units)) {
+              const u = units[id];
+              const moving = u.state === UnitState.Moving && u.path.length > 0;
+              let stamina = u.stamina;
+              let running = u.running;
+
+              if (moving) {
+                running = running ? stamina > 0 : stamina > STAMINA_RUN_THRESHOLD;
+                stamina = running
+                  ? Math.max(0, stamina - STAMINA_RUN_DRAIN)
+                  : Math.min(STAMINA_MAX, stamina + STAMINA_WALK_REGEN);
+              } else {
+                running = false;
+                stamina = Math.min(STAMINA_MAX, stamina + STAMINA_IDLE_REGEN);
+              }
+
+              if (stamina !== u.stamina || running !== u.running) units[id] = { ...u, stamina, running };
             }
 
             return {
