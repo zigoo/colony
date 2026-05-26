@@ -204,7 +204,15 @@ export const GameCanvasGL = () => {
       fpsElapsed += delta;
 
       if (fpsElapsed >= FPS_UPDATE_MS) {
-        useFps.getState().set(Math.round((fpsFrames * 1000) / fpsElapsed));
+        const fps = Math.round((fpsFrames * 1000) / fpsElapsed);
+
+        useFps.getState().set({
+          fps,
+          treesHidden: !glScene.treesVisible,
+          treeCount: glScene.treeCount,
+          drawCalls: glScene.drawCalls,
+          triangles: glScene.triangles,
+        });
         fpsFrames = 0;
         fpsElapsed = 0;
       }

@@ -18,8 +18,15 @@ const box: React.CSSProperties = {
 };
 
 export const FpsIndicator = () => {
-  const fps = useFps(s => s.fps);
+  const { fps, treeCount, drawCalls, triangles } = useFps();
   const color = fps >= FPS_GOOD ? '#7dda7d' : fps >= FPS_OK ? '#f0c060' : '#e05050';
 
-  return <div style={{ ...box, color }}>{fps} FPS</div>;
+  return (
+    <div style={{ ...box, color }}>
+      {fps} FPS{' '}
+      <span style={{ color: 'rgba(255,255,255,0.6)' }}>
+        · calls:{drawCalls} · tris:{(triangles / 1e6).toFixed(2)}M · trees:{treeCount}
+      </span>
+    </div>
+  );
 };
