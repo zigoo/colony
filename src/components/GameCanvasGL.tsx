@@ -19,6 +19,17 @@ const MAX_FRAME_DELTA_MS = 200; // clamp so a backgrounded tab doesn't fast-forw
 const FPS_UPDATE_MS = 500;      // how often the on-screen FPS readout refreshes
 const EDGE_PAN_MARGIN = 28;     // px from a screen edge that triggers edge-scroll
 const EDGE_PAN_SPEED = 14;      // equivalent drag pixels/frame at the very edge
+const ROTATE_DEG_PER_PIXEL = 0.4; // right-drag orbit sensitivity
+const ROTATE_KEY_STEP = 15;       // Q/E discrete rotation step in degrees
+const RIGHT_BUTTON = 2;
+
+// Orbits the camera by adjusting the shared azimuth param, wrapped to [0, 360).
+const rotateCamera = (deltaDeg: number): void => {
+  const cur = useGLParams.getState().camAzimuthDeg;
+  const next = ((cur + deltaDeg) % 360 + 360) % 360;
+
+  useGLParams.getState().set('camAzimuthDeg', next);
+};
 
 const toNdc = (e: MouseEvent): { x: number; y: number } => ({
   x: (e.clientX / window.innerWidth) * 2 - 1,
@@ -53,6 +64,7 @@ export const GameCanvasGL = () => {
     // ── interaction (pan + zoom + picking; shift+drag = box select) ──
     let dragging = false;
     let boxSelecting = false;
+    let orbiting = false;
     let hasMoved = false;
     let last = { x: 0, y: 0 };
     let down = { x: 0, y: 0 };
@@ -60,6 +72,13 @@ export const GameCanvasGL = () => {
     let mouseY = -1;
 
     const onMouseDown = (e: MouseEvent) => {
+      if (e.button === RIGHT_BUTTON) {
+        orbiting = true;
+        last = { x: e.clientX, y: e.clientY };
+
+        return;
+      }
+
       hasMoved = false;
       last = { x: e.clientX, y: e.clientY };
       down = { x: e.clientX, y: e.clientY };
@@ -67,7 +86,15 @@ export const GameCanvasGL = () => {
       if (e.shiftKey) boxSelecting = true;
       else dragging = true;
     };
+    const onContextMenu = (e: MouseEvent) => e.preventDefault();
     const onMouseMove = (e: MouseEvent) => {
+      if (orbiting) {
+        rotateCamera((e.clientX - last.x) * ROTATE_DEG_PER_PIXEL);
+        last = { x: e.clientX, y: e.clientY };
+
+        return;
+      }
+
       if (boxSelecting) {
         useStore.getState().setSelectionBox({ x1: down.x, y1: down.y, x2: e.clientX, y2: e.clientY });
 
@@ -121,6 +148,12 @@ export const GameCanvasGL = () => {
       useUnitHover.getState().set(hoveredId ? st.game.units[hoveredId]?.name ?? null : null, e.clientX, e.clientY);
     };
     const onMouseUp = (e: MouseEvent) => {
+      if (orbiting) {
+        orbiting = false;
+
+        return;
+      }
+
       const store = useStore.getState();
 
       if (boxSelecting) {
@@ -145,19 +178,30 @@ export const GameCanvasGL = () => {
             store.selectBuildingType(null);
             glScene.setHoverColor(HOVER_COLOR);
           }
+
+          dragging = false;
+
+          return;
+        }
+
+        const unitId = cell ? store.occupants[`${cell.col},${cell.row}`] : undefined;
+        const buildingId = unitId ? null : glScene.pickBuildingId(n.x, n.y);
+
+        if (unitId) {
+          store.selectUnits([unitId]);
+          store.selectBuilding(null);
+        } else if (buildingId) {
+          store.selectBuilding(buildingId);
+          store.selectUnits([]);
         } else if (!cell) {
           store.selectUnits([]);
           store.selectTile(null, null);
+          store.selectBuilding(null);
+        } else if (store.ui.selectedUnitIds.length > 0) {
+          store.ui.selectedUnitIds.forEach((id, i) => store.moveUnitTo(id, cell.col, cell.row, i * 2));
         } else {
-          const unitId = store.occupants[`${cell.col},${cell.row}`];
-
-          if (unitId) {
-            store.selectUnits([unitId]);
-          } else if (store.ui.selectedUnitIds.length > 0) {
-            store.ui.selectedUnitIds.forEach((id, i) => store.moveUnitTo(id, cell.col, cell.row, i * 2));
-          } else {
-            store.selectTile(cell.col, cell.row);
-          }
+          store.selectTile(cell.col, cell.row);
+          store.selectBuilding(null);
         }
       }
 
@@ -178,7 +222,20 @@ export const GameCanvasGL = () => {
         useStore.getState().selectUnits([]);
         useStore.getState().selectTile(null, null);
         useStore.getState().selectBuildingType(null);
+        useStore.getState().selectBuilding(null);
         glScene.setHoverColor(HOVER_COLOR);
+
+        return;
+      }
+
+      if (e.key === 'q' || e.key === 'Q') {
+        rotateCamera(-ROTATE_KEY_STEP);
+
+        return;
+      }
+
+      if (e.key === 'e' || e.key === 'E') {
+        rotateCamera(ROTATE_KEY_STEP);
 
         return;
       }
@@ -207,6 +264,7 @@ export const GameCanvasGL = () => {
     });
 
     el.addEventListener('mousedown', onMouseDown);
+    el.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     el.addEventListener('mouseleave', onMouseLeave);
@@ -283,6 +341,7 @@ export const GameCanvasGL = () => {
       unsubParams();
       unsubSel();
       el.removeEventListener('mousedown', onMouseDown);
+      el.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
       el.removeEventListener('mouseleave', onMouseLeave);

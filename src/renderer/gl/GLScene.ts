@@ -228,6 +228,13 @@ export class GLScene {
     return this.heightSampler ? this.heightSampler(col + 0.5, row + 0.5) : 0;
   }
 
+  // Building id under the cursor (raycast against the building meshes), or null.
+  pickBuildingId(ndcX: number, ndcY: number): string | null {
+    this.raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
+
+    return this.entities.pickBuildingId(this.raycaster);
+  }
+
   get treeCount(): number {
     return this.world.treeCount;
   }

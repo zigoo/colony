@@ -16,7 +16,7 @@ const SLIDERS: { group: string; items: SliderDef[] }[] = [
     group: 'Camera',
     items: [
       { key: 'camElevationDeg', label: 'Elevation°', min: 10, max: 80, step: 1 },
-      { key: 'camAzimuthDeg', label: 'Azimuth°', min: 0, max: 90, step: 1 },
+      { key: 'camAzimuthDeg', label: 'Azimuth°', min: 0, max: 360, step: 1 },
       { key: 'viewSize', label: 'View size (zoom out)', min: 15, max: 160, step: 1 },
     ],
   },

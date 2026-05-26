@@ -132,6 +132,8 @@ export class GLEntities {
 
       if (!entry) {
         entry = this.makeBuilding(b);
+        entry.object.userData.buildingId = b.id;
+        if (entry.bladeYaw) entry.bladeYaw.userData.buildingId = b.id;
         this.buildings.set(b.id, entry);
         this.group.add(entry.object);
       }
@@ -179,6 +181,27 @@ export class GLEntities {
         entry.mixer?.update(dt);
       }
     }
+  }
+
+  // First building whose mesh the ray hits (walks up to the node tagged with the
+  // building id), so picking matches the visible model rather than the footprint.
+  pickBuildingId(raycaster: THREE.Raycaster): string | null {
+    const objects: THREE.Object3D[] = [];
+
+    for (const entry of this.buildings.values()) objects.push(entry.object);
+
+    const hits = raycaster.intersectObjects(objects, true);
+
+    for (const hit of hits) {
+      let o: THREE.Object3D | null = hit.object;
+
+      while (o) {
+        if (typeof o.userData.buildingId === 'string') return o.userData.buildingId;
+        o = o.parent;
+      }
+    }
+
+    return null;
   }
 
   dispose(): void {
